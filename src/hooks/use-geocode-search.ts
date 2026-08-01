@@ -26,24 +26,37 @@ export function useGeocodeSearch(query: string): GeocodeSearchState {
 
   const lastCallRef = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
+  const rateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** 本 effect 挂载代次，用于限流等待后校验是否仍属本次请求。 */
+  const effectSeqRef = useRef(0);
 
   useEffect(() => {
     const q = query.trim();
+    const seq = ++effectSeqRef.current;
+
     if (!q) {
       setResults([]);
       setLoading(false);
       setError(null);
       abortRef.current?.abort();
       abortRef.current = null;
+      if (rateTimerRef.current) {
+        clearTimeout(rateTimerRef.current);
+        rateTimerRef.current = null;
+      }
       return;
     }
 
     const timer = setTimeout(async () => {
-      // 限流：距上次请求不足 1s 则补足等待
+      // 限流：距上次请求不足 1s 则补足等待；timer 挂到 rateTimerRef 以便 cleanup 取消
       const elapsed = Date.now() - lastCallRef.current;
       if (elapsed < NOMINATIM_RATE_LIMIT_MS) {
-        await new Promise((r) => setTimeout(r, NOMINATIM_RATE_LIMIT_MS - elapsed));
+        await new Promise<void>((resolve) => {
+          rateTimerRef.current = setTimeout(resolve, NOMINATIM_RATE_LIMIT_MS - elapsed);
+        });
       }
+      // 被取消 / 新请求已进来 → 本次 seq 过期，直接丢弃不更新 lastCall / 状态
+      if (seq !== effectSeqRef.current) return;
       lastCallRef.current = Date.now();
 
       // 取消上一个进行中的请求
@@ -55,12 +68,13 @@ export function useGeocodeSearch(query: string): GeocodeSearchState {
       setError(null);
       try {
         const r = await searchAddress(q, ac.signal);
-        setResults(r);
+        if (seq === effectSeqRef.current) setResults(r);
       } catch (e) {
         if ((e as Error).name === 'AbortError') {
           // 被新请求取消，静默
           return;
         }
+        if (seq !== effectSeqRef.current) return;
         if (e instanceof GeocodeError) {
           setError(e.message);
         } else {
@@ -70,13 +84,19 @@ export function useGeocodeSearch(query: string): GeocodeSearchState {
         setResults([]);
       } finally {
         // 仅当本次请求仍是最新时才清 loading
-        if (abortRef.current === ac) {
+        if (abortRef.current === ac && seq === effectSeqRef.current) {
           setLoading(false);
         }
       }
     }, SEARCH_DEBOUNCE_MS);
 
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(timer);
+      if (rateTimerRef.current) {
+        clearTimeout(rateTimerRef.current);
+        rateTimerRef.current = null;
+      }
+    };
   }, [query]);
 
   return {

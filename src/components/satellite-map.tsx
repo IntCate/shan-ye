@@ -1,3 +1,5 @@
+"use no memo";
+
 /**
  * 卫星地图组件（原生端）。
  *
@@ -44,6 +46,15 @@ export const SatelliteMap = forwardRef<SatelliteMapHandle, SatelliteMapProps>(fu
   // 与外层 onUserLocationChange 回调同源，但需为 state 才能触发 cone Marker 重渲染。
   // 系统蓝点由 showsUserLocation 渲染，cone Marker 锚定同坐标叠加其上，同帧更新无偏移。
   const [userCoord, setUserCoord] = useState<GeoPoint | null>(null);
+
+  // 暴露 animateToRegion 给业务侧：业务侧 mapRef.current.animateToRegion 直接生效，
+  // 无需直接访问 MapView ref（避免跨层耦合）。缺失此调用会导致 ref.current 恒为 undefined，
+  // 所有 moveMap（定位/搜索/路线选择）都会静默失败。
+  useImperativeHandle(ref, () => ({
+    animateToRegion: (region: { latitude: number; longitude: number; latitudeDelta: number; longitudeDelta: number }, durationMs = DEFAULT_ANIMATE_DURATION) => {
+      mapRef.current?.animateToRegion(region, durationMs);
+    },
+  }));
 
   // 新 Marker mount 后下一帧弹 Callout：长按时 native 不会 deselect annotation，
   // 无 showCallout 竞态，直接 rAF 即可，不需要 setTimeout 延迟或 onDeselect 兜底。

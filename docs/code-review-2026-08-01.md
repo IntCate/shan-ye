@@ -1,24 +1,25 @@
 # Omni `src/` 代码审查报告
 
 - **审查日期**：2026-08-01
+- **最后修订**：2026-08-02（修复 #1 #2 #3 #4 #7，核实 #5 #6 审查前已修复）
 - **审查范围**：`src/` 目录全部 22 个文件（app / components / hooks / services / constants / types）
 - **审查基线**：Expo SDK 57.0.9 · React 19.2.3 · RN 0.86.2 · react-native-maps 1.27.2 · TypeScript strict
 - **审查方式**：静态阅读 + `rg` 交叉验证（死代码、指令缺失、未使用参数）
 
 ## 一、问题汇总
 
-| # | 优先级 | 类别 | 问题 | 文件 |
-| - | ------ | ---- | ---- | ---- |
-| 1 | P0 | 风险 | `satellite-map.tsx` 缺少 `"use no memo"` 指令 | [satellite-map.tsx](../src/components/satellite-map.tsx) |
-| 2 | P1 | 性能 | `splashKeyframe` 在组件内每次渲染重建 | [animated-icon.tsx:17-34](../src/components/animated-icon.tsx) |
-| 3 | P1 | 死代码 | `hint-row.tsx` 完全未被引用 | [hint-row.tsx](../src/components/hint-row.tsx) |
-| 4 | P1 | 死代码 | `ThemedView` 的 `lightColor`/`darkColor` 参数未使用 | [themed-view.tsx:7-12](../src/components/themed-view.tsx) |
-| 5 | P2 | 模板残留 | Web 端 Tab 品牌文字仍为 `Expo Starter` | [app-tabs.web.tsx:58](../src/components/app-tabs.web.tsx) |
-| 6 | P2 | 模板残留 | `explore.tsx` 整页为 Expo 模板示例内容 | [explore.tsx](../src/app/explore.tsx) |
-| 7 | P3 | 健壮性 | `useGeocodeSearch` 限流等待不可取消 | [use-geocode-search.ts:44-46](../src/hooks/use-geocode-search.ts) |
-| 8 | P3 | 配置 | Android Maps API key / bundleId 占位符 | [app.json:12,46](../app.json) |
-| 9 | P3 | 可维护性 | ~~`edgePadding` useMemo 依赖数组需随浮层变化同步~~（已随 #10 移除） | [index.tsx:60](../src/app/index.tsx) |
-| 10 | P1 | 死代码 | `edgePadding` prop 在 react-native-maps 中不存在，整条视觉补偿链路无效（已修复） | [index.tsx](../src/app/index.tsx) · [satellite-map.tsx](../src/components/satellite-map.tsx) · [types/map.ts](../src/types/map.ts) |
+| # | 优先级 | 类别 | 问题 | 文件 | 状态 |
+| - | ------ | ---- | ---- | ---- | ---- |
+| 1 | P0 | 风险 | `satellite-map.tsx` 缺少 `"use no memo"` 指令 | [satellite-map.tsx](../src/components/satellite-map.tsx) | ✅ 已修复（2026-08-02） |
+| 2 | P1 | 性能 | `splashKeyframe` 在组件内每次渲染重建 | [animated-icon.tsx:17-34](../src/components/animated-icon.tsx) | ✅ 已修复（2026-08-02） |
+| 3 | P1 | 死代码 | `hint-row.tsx` 完全未被引用 | [hint-row.tsx](../src/components/hint-row.tsx) | ✅ 已修复（2026-08-02） |
+| 4 | P1 | 死代码 | `ThemedView` 的 `lightColor`/`darkColor` 参数未使用 | [themed-view.tsx:7-12](../src/components/themed-view.tsx) | ✅ 已修复（2026-08-02） |
+| 5 | P2 | 模板残留 | Web 端 Tab 品牌文字仍为 `Expo Starter` | [app-tabs.web.tsx:58](../src/components/app-tabs.web.tsx) | ✅ 已修复（审查前已改为 Omni） |
+| 6 | P2 | 模板残留 | `explore.tsx` 整页为 Expo 模板示例内容 | [explore.tsx](../src/app/explore.tsx) | ✅ 已修复（审查前已改为相册页） |
+| 7 | P3 | 健壮性 | `useGeocodeSearch` 限流等待不可取消 | [use-geocode-search.ts:44-46](../src/hooks/use-geocode-search.ts) | ✅ 已修复（2026-08-02） |
+| 8 | P3 | 配置 | Android Maps API key / bundleId 占位符 | [app.json:12,46](../app.json) | ⏳ 需外部资源 |
+| 9 | P3 | 可维护性 | ~~`edgePadding` useMemo 依赖数组需随浮层变化同步~~（已随 #10 移除） | [index.tsx:60](../src/app/index.tsx) | ❌ 已随 #10 失效 |
+| 10 | P1 | 死代码 | `edgePadding` prop 在 react-native-maps 中不存在，整条视觉补偿链路无效 | [index.tsx](../src/app/index.tsx) · [satellite-map.tsx](../src/components/satellite-map.tsx) · [types/map.ts](../src/types/map.ts) | ✅ 已修复（2026-08-01） |
 
 > 优先级定义：P0 = 影响功能正确性；P1 = 影响性能或为明确死代码；P2 = 体验/品牌一致性；P3 = 健壮性与配置收尾。
 
@@ -176,12 +177,12 @@ return () => {
 
 ## 三、改进路线图
 
-| 阶段 | 事项 | 涉及问题 |
-| ---- | ---- | -------- |
-| 阶段 1（自动可修） | 补 `"use no memo"`、`splashKeyframe` 外提、删 hint-row、清理 ThemedView 死参数、Web 品牌文字改 Omni | #1 #2 #3 #4 #5 |
-| 阶段 2（需产品决策） | 重写 explore.tsx 业务页 | #6 |
-| 阶段 3（需外部资源） | 申请 Android Maps API key、确定正式 bundleId | #8 |
-| 阶段 4（健壮性增强） | 限流等待可取消化 | #7 |
+| 阶段 | 事项 | 涉及问题 | 状态 |
+| ---- | ---- | -------- | ---- |
+| 阶段 1（自动可修） | 补 `"use no memo"`、`splashKeyframe` 外提、删 hint-row、清理 ThemedView 死参数、Web 品牌文字改 Omni | #1 #2 #3 #4 #5 | ✅ 全部完成（2026-08-02） |
+| 阶段 2（需产品决策） | 重写 explore.tsx 业务页 | #6 | ✅ 审查前已改为相册页（无需产品决策） |
+| 阶段 3（需外部资源） | 申请 Android Maps API key、确定正式 bundleId | #8 | ⏳ 需外部资源 |
+| 阶段 4（健壮性增强） | 限流等待可取消化 | #7 | ✅ 已完成（2026-08-02，提前并入阶段 1） |
 
 ## 四、整体评价
 
@@ -194,12 +195,83 @@ return () => {
 
 主要技术债集中在两类：
 
-1. **模板残留清理**（#3 #4 #5 #6）——低成本、高收益
-2. **Reanimated / React Compiler 已知风险**（#1 #2）——历史经验已记录但未落实，需优先修复
+1. **模板残留清理**（#3 #4 #5 #6）——低成本、高收益（#5 #6 审查前已由业务迭代修复，本次补 #3 #4）
+2. **Reanimated / React Compiler 已知风险**（#1 #2）——历史经验已记录但未落实，本次补齐
 
-修复阶段 1 全部 5 项后，`src/` 即可达到「无死代码、无已知风险回归」的基线状态。
+截至 2026-08-02，阶段 1（自动可修）、阶段 2（产品决策项）、阶段 4（健壮性增强）全部完成；仅剩阶段 3（Android Maps API key + bundleId）依赖外部资源待办。`src/` 已达「无死代码、无已知风险回归、无模板残留」的基线状态。
 
 ## 五、修复日志
+
+### 2026-08-02：阶段 1 收官 + 健壮性增强 + 核实 #5 #6 已修复（对应 #1 #2 #3 #4 #5 #6 #7）
+
+本次一次性修复 5 项阶段 1 自动可修问题 + 1 项阶段 4 健壮性问题，连带核实 #5 与 #6 在审查前的业务迭代中已修复：
+
+#### 修复 #1 — `satellite-map.tsx` 补 `"use no memo"`
+
+- **位置**：[src/components/satellite-map.tsx#L1](../src/components/satellite-map.tsx#L1)
+- **动作**：在文件首行（JSDoc 注释之前）插入 `"use no memo"` 指令。
+- **根因**：`app.json` 中 `experiments.reactCompiler: true` 已开启，但卫星地图组件（含 `forwardRef` + `useImperativeHandle` + MapView 原生 ref + Marker/Polyline 列表）是 React Compiler 自动记忆化易出错的典型形态——轻则 ref 失效、重则地图不渲染或区域动画异常。
+- **验证**：`npx tsc --noEmit` 通过。
+
+#### 修复 #2 — `splashKeyframe` 从组件内提升至模块级
+
+- **位置**：[src/components/animated-icon.tsx#L11-L28](../src/components/animated-icon.tsx#L11-L28)
+- **动作**：把 `AnimatedSplashOverlay` 函数体内的 `const splashKeyframe = new Keyframe({...})` 移到模块级，与已正确外提的 `keyframe` / `logoKeyframe` / `glowKeyframe` 并列。
+- **根因**：`splashKeyframe` 无任何组件内 state 或 prop 依赖（仅引用模块级常量 `DURATION`），放在组件内会在 `animate` / `visible` state 切换时每次 render 都新建 Keyframe 实例，造成不必要的 GC 压力，也与项目约定「Keyframe 应提至模块级」不一致。
+- **验证**：`npx tsc --noEmit` 通过。开屏过渡需真机回归，逻辑等价不影响行为。
+
+#### 修复 #3 — 删除 `hint-row.tsx` 死代码
+
+- **动作**：删除 [src/components/hint-row.tsx](../src/components/hint-row.tsx) 文件。
+- **根因**：`rg -n "hint-row|HintRow" src` 仅命中文件自身定义行，`src/app` 与 `src/components` 全仓无任何 import 或渲染调用。属于 Expo 模板遗留组件（展示 "Try editing `app/index.tsx`" 的编辑提示），无业务用途。
+- **验证**：`npx tsc --noEmit` 通过；删除后重新 `rg` 无残留引用。
+
+#### 修复 #4 — 清理 `ThemedView` 的 `lightColor` / `darkColor` 死参数
+
+- **位置**：[src/components/themed-view.tsx#L6-L10](../src/components/themed-view.tsx#L6-L10)
+- **动作**：
+  1. 从 `ThemedViewProps` 中移除 `lightColor?: string` 与 `darkColor?: string` 两个字段；
+  2. 从 `ThemedView` 参数解构中移除 `lightColor, darkColor`。
+- **根因**：两参数在类型中声明、在函数参数中解构后，函数体从未引用；实际主题机制走 `useTheme()` + `type` 映射（`theme[type ?? 'background']`），与「按 prop 指定明暗色」的旧 API 已完全脱钩。全仓 `rg "lightColor|darkColor" src` 也无调用方传值。保留会暴露不存在的 API、误导调用方。
+- **验证**：`npx tsc --noEmit` 通过。
+
+#### 核实 #5 — Web 端品牌文字已为 `Omni`（审查报告描述过时）
+
+- **位置**：[src/components/app-tabs.web.tsx#L58-L60](../src/components/app-tabs.web.tsx#L58-L60)
+- **实际状态**：`<ThemedText type="smallBold" style={styles.brandText}>Omni</ThemedText>`——已非模板默认值 `Expo Starter`。
+- **结论**：审查时该内容已在某次业务迭代中修复，报告原文描述已过时，本次在问题汇总表中标记状态为「✅ 已修复（审查前已改为 Omni）」，无代码改动。
+
+#### 核实 #6 — `explore.tsx` 已为相册页（审查报告描述过时）
+
+- **位置**：[src/app/explore.tsx](../src/app/explore.tsx)
+- **实际状态**：
+  ```tsx
+  /**
+   * Explore Tab：相册页面（仿 iOS 相册）。
+   *
+   * 仅作薄外壳，相册逻辑（权限门控、网格、查看器）封装在 PhotoAlbum 组件内。
+   */
+  import { PhotoAlbum } from '@/components/photo-album/photo-album';
+  export default function TabTwoScreen() { return <PhotoAlbum />; }
+  ```
+  与 `app-tabs.tsx` / `app-tabs.web.tsx` 第二个 Tab 显示的「图库」文字完全对应；配套实现文件齐全（`src/components/photo-album/photo-album.tsx`、`photo-album.web.tsx`、`src/types/photo-album.ts`、设计文档）。
+- **结论**：审查时该内容已在某次业务迭代中替换为真实业务页，报告原文「整页为 Expo 入门示例（Collapsible 教程…）」是审查时的旧快照，已过时。本次在问题汇总表中标记状态为「✅ 已修复（审查前已改为相册页）」，改进路线图阶段 2 相应标记为已完成（无需产品决策），无代码改动。
+
+#### 修复 #7 — `useGeocodeSearch` 限流等待可取消 + 代次校验防竞态
+
+- **位置**：[src/hooks/use-geocode-search.ts#L22-L100](../src/hooks/use-geocode-search.ts#L22-L100)
+- **问题回顾**：debounce 触发后，限流逻辑用 `await new Promise((r) => setTimeout(r, N - elapsed))` 等待。内层 `setTimeout` 未被跟踪，effect cleanup（`clearTimeout(timer)`）只能清外层 debounce timer，无法清掉已进入执行阶段的内层等待；连续快速输入时多个 debounce 回调可能并发完成限流等待并更新状态（虽然 `AbortController` 保护了 fetch 本身，但 `lastCallRef` 与 `setResults`/`setError` 存在竞态窗口）。
+
+- **修复策略（两点）**：
+  1. **限流 timer 可取消**：新增 `rateTimerRef`（`useRef<ReturnType<typeof setTimeout> | null>`），内层 `setTimeout` 句柄挂到该 ref 上；cleanup 函数中除了 `clearTimeout(timer)` 外，再加 `if (rateTimerRef.current) clearTimeout(rateTimerRef.current); rateTimerRef.current = null`。空查询分支同样清 rateTimer。
+  2. **effect 代次（seq）校验**：新增 `effectSeqRef`（`useRef(0)`），每次 effect 执行时 `const seq = ++effectSeqRef.current`。关键状态变更点前都加一道 `if (seq !== effectSeqRef.current) return;` 守卫：
+     - 限流等待结束后 → 还没到最新代则直接丢弃（连 `lastCallRef` 都不更新，避免污染限流窗口判断）
+     - `setResults` 前
+     - `setError` / `setResults([])` 前
+     - `finally` 中 `setLoading(false)` 前（与原有的 `abortRef.current === ac` 检查 AND 叠加）
+
+- **影响**：fetch 主体不变（仍用 `AbortController` 保护网络请求），新增的 seq 是内存中纯同步计数，无额外 IO 开销，把「限流后状态乱序」的窗口从 几十~几百 ms 收窄到 0。
+- **验证**：`npx tsc --noEmit` 通过。功能回归：搜索框连续快速输入、删光、再输入，观察到 loading/结果/error 状态不会闪旧值。
 
 ### 2026-08-01：移除 `edgePadding` 视觉补偿死代码链路（对应 #10，连带 #9）
 
