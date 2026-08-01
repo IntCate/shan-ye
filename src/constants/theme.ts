@@ -63,3 +63,14 @@ export const Spacing = {
 
 export const BottomTabInset = Platform.select({ ios: 50, android: 80 }) ?? 0;
 export const MaxContentWidth = 800;
+
+/**
+ * 液态玻璃统一 token：首页 4 个浮层 + web 底部栏共用。
+ * overlay rgba 对齐 expo-blur web 端 getBackgroundColor 的 tint=light/dark 色系，
+ * alpha 0.5 兼顾模糊透出与文字对比；BubbleTail 必须用同色以保证无缝。
+ */
+export const Glass = {
+  intensity: 50,
+  overlayLight: 'rgba(249, 249, 249, 0.5)',
+  overlayDark: 'rgba(25, 25, 25, 0.5)',
+} as const;

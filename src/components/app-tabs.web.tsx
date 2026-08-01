@@ -1,15 +1,16 @@
 import {
-  Tabs,
-  TabList,
-  TabTrigger,
-  TabSlot,
-  TabTriggerSlotProps,
-  TabListProps,
+    TabList,
+    TabListProps,
+    Tabs,
+    TabSlot,
+    TabTrigger,
+    TabTriggerSlotProps,
 } from 'expo-router/ui';
 import { SymbolView } from 'expo-symbols';
-import { Pressable, useColorScheme, View, StyleSheet } from 'react-native';
+import { Pressable, StyleSheet, useColorScheme, View } from 'react-native';
 
 import { ExternalLink } from './external-link';
+import { GlassPanel } from './glass-panel';
 import { ThemedText } from './themed-text';
 import { ThemedView } from './themed-view';
 
@@ -22,10 +23,10 @@ export default function AppTabs() {
       <TabList asChild>
         <CustomTabList>
           <TabTrigger name="home" href="/" asChild>
-            <TabButton>Home</TabButton>
+            <TabButton>首页</TabButton>
           </TabTrigger>
           <TabTrigger name="explore" href="/explore" asChild>
-            <TabButton>Explore</TabButton>
+            <TabButton>图库</TabButton>
           </TabTrigger>
         </CustomTabList>
       </TabList>
@@ -53,9 +54,9 @@ export function CustomTabList(props: TabListProps) {
 
   return (
     <View {...props} style={styles.tabListContainer}>
-      <ThemedView type="backgroundElement" style={styles.innerContainer}>
+      <GlassPanel style={styles.innerContainerOuter} contentStyle={styles.innerContainerContent}>
         <ThemedText type="smallBold" style={styles.brandText}>
-          Expo Starter
+          Omni
         </ThemedText>
 
         {props.children}
@@ -70,7 +71,7 @@ export function CustomTabList(props: TabListProps) {
             />
           </Pressable>
         </ExternalLink>
-      </ThemedView>
+      </GlassPanel>
     </View>
   );
 }
@@ -84,15 +85,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     flexDirection: 'row',
   },
-  innerContainer: {
+  /** 外层：圆角 + 布局尺寸（不裁剪，阴影可见） */
+  innerContainerOuter: {
+    borderRadius: Spacing.five,
+    flexGrow: 1,
+    maxWidth: MaxContentWidth,
+  },
+  /** 内层内容：padding/flexDirection 移到 contentStyle */
+  innerContainerContent: {
     paddingVertical: Spacing.two,
     paddingHorizontal: Spacing.five,
-    borderRadius: Spacing.five,
     flexDirection: 'row',
     alignItems: 'center',
-    flexGrow: 1,
     gap: Spacing.two,
-    maxWidth: MaxContentWidth,
   },
   brandText: {
     marginRight: 'auto',
