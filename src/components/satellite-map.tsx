@@ -66,12 +66,16 @@ export const SatelliteMap = forwardRef<SatelliteMapHandle, SatelliteMapProps>(fu
     return () => cancelAnimationFrame(id);
   }, [markers]);
 
+  // 'weather' 是业务侧自定义类型，react-native-maps 不支持；映射到 'standard'，
+  // 后续可在地图上叠加天气图层（如降水/云图 TileOverlay）。
+  const nativeMapType = mapType === 'weather' ? 'standard' : mapType;
+
   return (
     <MapView
       ref={mapRef}
       style={StyleSheet.absoluteFill}
       initialRegion={initialRegion}
-      mapType={mapType}
+      mapType={nativeMapType}
       showsUserLocation={showsUserLocation}
       showsCompass={false}
       paddingAdjustmentBehavior="always"

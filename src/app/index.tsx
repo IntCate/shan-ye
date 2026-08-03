@@ -20,9 +20,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BubbleTail } from '@/components/bubble-tail';
 import { GlassPanel } from '@/components/glass-panel';
 import { MapFloatingButton } from '@/components/map-floating-button';
-import { MapLayerMenu } from '@/components/map-layer-menu';
+import { MapLayerMenu, type LayerKey } from '@/components/map-layer-menu';
 import { MapSearchBar } from '@/components/map-search-bar';
 import { PhotoDetailSheet } from '@/components/photo-detail-sheet';
+import { ProfileSheet } from '@/components/profile-sheet';
 import { RouteManagerPanel } from '@/components/route-manager-panel';
 import { SatelliteMap } from '@/components/satellite-map';
 import { ThemedText } from '@/components/themed-text';
@@ -77,19 +78,23 @@ export default function HomeScreen() {
   const { photos } = useGeotaggedPhotos();
   // 当前选中的照片（非 null 时弹出底部详情面板）
   const [selectedPhoto, setSelectedPhoto] = useState<GeoTaggedPhoto | null>(null);
-  // 地图图层类型（标准 / 卫星），由图层选择器切换
+  // 地图图层类型（标准 / 卫星 / 天气），由「我的」面板切换
   const [mapType, setMapType] = useState<MapType>('hybrid');
+  // 图层显隐开关（多选）：控制地图上路径 / 照片是否显示，由图层多选器切换
+  const [layers, setLayers] = useState<Record<LayerKey, boolean>>({ routes: true, photos: true });
   // 照片 EXIF GPS 为 WGS-84。Apple Maps 卫星图底图用 GCJ-02 但不做内部转换，
   // 需手动 WGS-84 → GCJ-02 对齐底图（中国境外 wgs84ToGcj02 自动跳过）。
   // 矢量图模式（standard 等）由 Apple Maps 内部处理 WGS-84 → GCJ-02，无需手动转换。
+  // layers.photos=false 时返回空数组，隐藏地图上所有照片 Marker。
   const photoMarkers = useMemo(() => {
+    if (!layers.photos) return [];
     const isSatellite =
       mapType === 'satellite' ||
       mapType === 'hybrid' ||
       mapType === 'satelliteFlyover' ||
       mapType === 'hybridFlyover';
     return isSatellite ? photos.map((p) => withConvertedCoords(p, wgs84ToGcj02)) : photos;
-  }, [photos, mapType]);
+  }, [photos, mapType, layers.photos]);
   // 图层选择器浮层是否展开
   const [layerMenuVisible, setLayerMenuVisible] = useState(false);
   // 「图层」按钮在按钮组内的位置/尺寸，用于把选择器浮层定位到按钮左侧并垂直居中
@@ -102,6 +107,8 @@ export default function HomeScreen() {
   const { routes, loading: routeLoading, error: routeError, importRoute, toggleRoute, cycleCoordMode, removeRoute, clearError } = useRoutes();
   // 路径管理浮层是否展开
   const [routePanelVisible, setRoutePanelVisible] = useState(false);
+  // 「我的」个人中心底部卡片是否展开
+  const [profileVisible, setProfileVisible] = useState(false);
   // 「路径」按钮在按钮组内的位置/尺寸，用于把浮层定位到按钮左侧并垂直居中
   const [routeBtnLayout, setRouteBtnLayout] = useState<{
     y: number;
@@ -231,7 +238,7 @@ export default function HomeScreen() {
         mapType={mapType}
         markers={markers}
         photoMarkers={photoMarkers}
-        routes={routes}
+        routes={layers.routes ? routes : []}
         heading={heading.heading}
         onPhotoPress={setSelectedPhoto}
         showsUserLocation
@@ -251,7 +258,12 @@ export default function HomeScreen() {
       <View style={[styles.floatingBtns, { bottom: insets.bottom + Spacing.three }]}>
         <MapFloatingButton
           symbol={{ ios: 'person.fill', android: 'person', web: 'person' }}
-          onPress={() => {}}
+          onPress={() => {
+            // 互斥：打开「我的」时关闭图层/路径浮层
+            setLayerMenuVisible(false);
+            setRoutePanelVisible(false);
+            setProfileVisible(true);
+          }}
           accessibilityLabel="我的"
         />
         {/* 包一层 View 以 onLayout 取「图层」按钮在按钮组内的位置/尺寸，供浮层定位 */}
@@ -304,9 +316,9 @@ export default function HomeScreen() {
           accessibilityLabel="返回当前位置"
         />
 
-        {/* 图层选择器浮层：absolute 定位到「图层」按钮左侧、与按钮同高并垂直居中。
+        {/* 图层多选器浮层：absolute 定位到「图层」按钮左侧、与按钮同高并垂直居中。
             容器 top/height 对齐按钮，内部 justifyContent 居中菜单，无需 transform 百分比。
-            点选项切换 mapType 并收起。 */}
+            勾选项切换地图上路径/照片的显隐，不收起浮层（多选器行为）。 */}
         {layerMenuVisible && layerBtnLayout && (
           <View
             style={[
@@ -318,11 +330,8 @@ export default function HomeScreen() {
               },
             ]}>
             <MapLayerMenu
-              selected={mapType}
-              onSelect={(t) => {
-                setMapType(t);
-                setLayerMenuVisible(false);
-              }}
+              layers={layers}
+              onToggle={(key) => setLayers((prev) => ({ ...prev, [key]: !prev[key] }))}
             />
           </View>
         )}
@@ -395,6 +404,16 @@ export default function HomeScreen() {
 
       {/* 照片详情面板：点击地图照片图片 Marker 后从底部滑出 */}
       <PhotoDetailSheet photo={selectedPhoto} onClose={() => setSelectedPhoto(null)} />
+
+      {/* 「我的」个人中心面板：点击「我的」按钮后从底部滑出 */}
+      <ProfileSheet
+        visible={profileVisible}
+        photoCount={photos.length}
+        routeCount={routes.length}
+        mapType={mapType}
+        onMapTypeChange={setMapType}
+        onClose={() => setProfileVisible(false)}
+      />
     </ThemedView>
   );
 }

@@ -30,7 +30,7 @@ export function MapSearchBar({ onSelect }: MapSearchBarProps) {
       <TextInput
         value={query}
         onChangeText={setQuery}
-        placeholder="搜索地址，如 天安门"
+        placeholder="查找地点"
         placeholderTextColor={theme.textSecondary}
         style={[styles.input, { color: theme.text }]}
         returnKeyType="search"

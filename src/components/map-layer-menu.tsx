@@ -1,10 +1,10 @@
 /**
- * 地图图层选择器（native）。
+ * 地图图层显示开关（native）——多选器。
  *
- * 浮层卡片，列出可选地图类型；当前选中项带 checkmark。点击选项触发 onSelect，
- * 由业务侧（首页）切换 mapType 并关闭浮层。
+ * 浮层卡片，列出可勾选的图层项（路径 / 照片）。点击项切换勾选状态（不关闭浮层），
+ * 由业务侧（首页）控制地图上 Polyline / Photo Marker 的显隐。
  *
- * 现仅「标准地图 / 卫星地图」两项，后续可向 OPTIONS 追加（如地形、3D）。
+ * 地图模式（标准/卫星/天气）的选择已移至「我的」面板，本组件仅负责图层显隐。
  */
 
 import { SymbolView } from 'expo-symbols';
@@ -15,19 +15,23 @@ import { GlassPanel } from '@/components/glass-panel';
 import { ThemedText } from '@/components/themed-text';
 import { Glass, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import type { MapType } from '@/types/map';
 
-const OPTIONS: { label: string; value: MapType }[] = [
-  { label: '标准地图', value: 'standard' },
-  { label: '卫星地图', value: 'hybrid' },
+/** 可勾选的图层项。 */
+export type LayerKey = 'routes' | 'photos';
+
+const OPTIONS: { label: string; value: LayerKey }[] = [
+  { label: '路径', value: 'routes' },
+  { label: '照片', value: 'photos' },
 ];
 
 export function MapLayerMenu({
-  selected,
-  onSelect,
+  layers,
+  onToggle,
 }: {
-  selected: MapType;
-  onSelect: (type: MapType) => void;
+  /** 各图层的勾选状态。 */
+  layers: Record<LayerKey, boolean>;
+  /** 切换指定图层的勾选状态。 */
+  onToggle: (key: LayerKey) => void;
 }) {
   const theme = useTheme();
   const isDark = useColorScheme() === 'dark';
@@ -35,22 +39,25 @@ export function MapLayerMenu({
     <View style={styles.wrap}>
       <GlassPanel style={styles.cardOuter} contentStyle={styles.cardContent}>
         {OPTIONS.map((opt) => {
-          const isSelected = selected === opt.value;
+          const isChecked = layers[opt.value];
           return (
             <Pressable
               key={opt.value}
-              onPress={() => onSelect(opt.value)}
+              onPress={() => onToggle(opt.value)}
               style={({ pressed }) => [styles.row, pressed && styles.pressed]}>
               <ThemedText type="small" style={styles.label}>
                 {opt.label}
               </ThemedText>
-              {isSelected && (
-                <SymbolView
-                  name={{ ios: 'checkmark', android: 'check', web: 'check' }}
-                  size={16}
-                  tintColor={theme.text}
-                />
-              )}
+              {/* 多选框：勾选用 checkmark.square.fill，未勾选用 square */}
+              <SymbolView
+                name={
+                  isChecked
+                    ? { ios: 'checkmark.square.fill', android: 'check_box', web: 'check_box' }
+                    : { ios: 'square', android: 'check_box_outline_blank', web: 'check_box_outline_blank' }
+                }
+                size={18}
+                tintColor={theme.text}
+              />
             </Pressable>
           );
         })}

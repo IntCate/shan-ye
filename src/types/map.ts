@@ -9,7 +9,8 @@
 import type { GeoTaggedPhoto } from './geotagged-photo';
 import type { Route } from './route';
 
-/** 与 react-native-maps 的 MapType 一致；本地定义以避免 Web 端引入原生包。 */
+/** 与 react-native-maps 的 MapType 一致，并扩展自定义类型 'weather'（天气地图，业务侧自定义渲染）。
+ * 本地定义以避免 Web 端引入原生包。 */
 export type MapType =
   | 'standard'
   | 'satellite'
@@ -18,7 +19,8 @@ export type MapType =
   | 'mutedStandard'
   | 'none'
   | 'satelliteFlyover'
-  | 'hybridFlyover';
+  | 'hybridFlyover'
+  | 'weather';
 
 export type GeoPoint = {
   latitude: number;
