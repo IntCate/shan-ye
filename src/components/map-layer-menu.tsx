@@ -1,8 +1,8 @@
 /**
  * 地图图层显示开关（native）——多选器。
  *
- * 浮层卡片，列出可勾选的图层项（路径 / 照片）。点击项切换勾选状态（不关闭浮层），
- * 由业务侧（首页）控制地图上 Polyline / Photo Marker 的显隐。
+ * 浮层卡片，列出可勾选的图层项（路径 / 照片 / 标点）。点击项切换勾选状态（不关闭浮层），
+ * 由业务侧（首页）控制地图上 Polyline / Photo Marker / 收藏标点 Marker 的显隐。
  *
  * 地图模式（标准/卫星/天气）的选择已移至「我的」面板，本组件仅负责图层显隐。
  */
@@ -17,11 +17,12 @@ import { Glass, Shadow, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 
 /** 可勾选的图层项。 */
-export type LayerKey = 'routes' | 'photos';
+export type LayerKey = 'routes' | 'photos' | 'placemarks';
 
 const OPTIONS: { label: string; value: LayerKey }[] = [
   { label: '路径', value: 'routes' },
   { label: '照片', value: 'photos' },
+  { label: '标点', value: 'placemarks' },
 ];
 
 export function MapLayerMenu({

@@ -21,7 +21,7 @@ export type User = {
 
 const STORAGE_KEY = '@omni/auth/user';
 
-export type UseAuthResult = {
+type UseAuthResult = {
   /** 当前登录用户；null = 未登录。 */
   user: User | null;
   /** 是否已完成本地登录态读取（避免启动时闪现未登录状态）。 */

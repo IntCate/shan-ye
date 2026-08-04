@@ -7,6 +7,7 @@
  */
 
 import type { GeoTaggedPhoto, PhotoCluster } from './geotagged-photo';
+import type { Placemark } from './placemark';
 import type { Route } from './route';
 
 /** 与 react-native-maps 的 MapType 一致，并扩展自定义类型 'weather'（天气地图，业务侧自定义渲染）。
@@ -66,6 +67,8 @@ export type SatelliteMapProps = {
   markers?: MapMarker[];
   /** 带 GPS 坐标的照片：在坐标处直接以图片 Marker 形式展示，点击触发 onPhotoPress。 */
   photoMarkers?: GeoTaggedPhoto[];
+  /** 收藏标点（长按地图保存的坐标点）：以橙色圆点 Marker 展示，点击弹 Callout 显示名称与坐标。 */
+  placemarks?: Placemark[];
   /** 导入的路径文件，按 visible 过滤后渲染为 Polyline。 */
   routes?: Route[];
   /** 点击照片 Marker 回调，业务侧据此弹出详情面板。 */

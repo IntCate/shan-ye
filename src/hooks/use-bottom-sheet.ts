@@ -1,3 +1,4 @@
+"use no memo";
 /**
  * 底部弹层（Bottom Sheet）共享逻辑：打开/关闭动画 + 纯关闭式拖拽手势工厂。
  *
@@ -8,9 +9,12 @@
  * 打开/关闭检测（visible 的 false→true / null→非 null 判定）因两个弹层的
  * 触发语义不同（PhotoDetailSheet 用 photo 字段、ProfileSheet 用 visible 布尔），
  * 交由调用方各自的 effect 处理：先做自身状态重置，再调用 open()。
+ *
+ * 本文件使用 "use no memo"：内含 sharedValue 写入 + Pan worklet 工厂，
+ * React Compiler 会干扰 shared value 与 worklet 的同步（见项目记录）。
  */
 
-import { useCallback, useRef } from 'react';
+import { useCallback } from 'react';
 import { Gesture } from 'react-native-gesture-handler';
 import { Easing, runOnJS, useSharedValue, withTiming } from 'react-native-reanimated';
 import type { SharedValue } from 'react-native-reanimated';
@@ -33,8 +37,6 @@ export type UseBottomSheetOptions = {
   height: SharedValue<number>;
   /** 首次挂载时卡片高度（translateY 初值 = 隐藏位）。 */
   initialHeight: number;
-  /** 打开后停靠的 translateY（0 = 完全展开）。 */
-  restingOffset?: SharedValue<number>;
 };
 
 export type BottomSheetControls = {
@@ -50,30 +52,26 @@ export function useBottomSheet({
   onClose,
   height,
   initialHeight,
-  restingOffset,
 }: UseBottomSheetOptions): BottomSheetControls {
   const translateY = useSharedValue(initialHeight);
   const backdropOpacity = useSharedValue(0);
-  // worklet 回调需读取最新 onClose，避免动画期间闭包陈旧
-  const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
 
   const open = useCallback(() => {
     translateY.value = height.value;
     backdropOpacity.value = 0;
-    translateY.value = withTiming(restingOffset?.value ?? 0, {
+    translateY.value = withTiming(0, {
       duration: ANIM_DURATION,
       easing: Easing.out(Easing.cubic),
     });
     backdropOpacity.value = withTiming(BACKDROP_OPACITY, { duration: ANIM_DURATION });
-  }, [height, restingOffset, translateY, backdropOpacity]);
+  }, [height, translateY, backdropOpacity]);
 
   const close = useCallback(() => {
     translateY.value = withTiming(height.value, { duration: ANIM_DURATION }, () => {
-      runOnJS(onCloseRef.current)();
+      runOnJS(onClose)();
     });
     backdropOpacity.value = withTiming(0, { duration: ANIM_DURATION });
-  }, [height, translateY, backdropOpacity]);
+  }, [height, translateY, backdropOpacity, onClose]);
 
   return { translateY, backdropOpacity, open, close };
 }

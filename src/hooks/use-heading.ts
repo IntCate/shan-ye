@@ -15,7 +15,7 @@ import { useEffect, useState } from 'react';
 import { Platform } from 'react-native';
 import * as Location from 'expo-location';
 
-export type HeadingState = {
+type HeadingState = {
   /** 真北朝向角度（0-360，0=正北，90=正东）；null = 不可用或权限未授予。 */
   heading: number | null;
   /** 磁力计校准等级 0-3（3=高精度，<20° 误差；0=不可用，>50° 误差）。 */

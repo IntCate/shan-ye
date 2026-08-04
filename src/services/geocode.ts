@@ -9,7 +9,7 @@
 import { NOMINATIM_ENDPOINT, SEARCH_MAX_RESULTS } from '@/constants/map';
 import type { SearchResult } from '@/types/map';
 
-export type GeocodeErrorKind = 'network' | 'rate' | 'empty' | 'parse';
+type GeocodeErrorKind = 'network' | 'rate' | 'empty' | 'parse';
 
 export class GeocodeError extends Error {
   constructor(public kind: GeocodeErrorKind, message: string) {

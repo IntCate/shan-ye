@@ -1,3 +1,4 @@
+"use no memo";
 /**
  * 照片详情底部卡片（native）。
  *
@@ -21,6 +22,9 @@
  *
  * 组件常驻挂载（由父级始终渲染），内部按 photo 提前 return：photo 为 null 时不渲染 Modal。
  * 打开动画由 photo 的 null→非 null 过渡驱动（见下方 effect），关闭由 close / 拖拽驱动。
+ *
+ * 本文件使用 "use no memo"：含 sharedValue + Pan worklet，React Compiler 会干扰
+ * shared value 与 worklet 的同步（见项目记录，与 profile-sheet/bottom-sheet-modal 同因）。
  */
 
 import { Image } from 'expo-image';

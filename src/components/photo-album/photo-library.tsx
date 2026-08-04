@@ -8,8 +8,8 @@
  */
 
 import { presentPermissionsPicker } from 'expo-media-library';
-import { useState } from 'react';
-import { Linking, Pressable, StyleSheet, View } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Linking, Platform, Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -47,7 +47,11 @@ export function PhotoLibrary({
           onPress={() => Linking.openSettings()}
         />
       ) : status === 'granted' ? (
-        <PhotoLibraryContent limited={limited} onViewerOpenChange={onViewerOpenChange} />
+        <PhotoLibraryContent
+          limited={limited}
+          onRequestFullAccess={() => requestPermission()}
+          onViewerOpenChange={onViewerOpenChange}
+        />
       ) : null}
     </View>
   );
@@ -80,35 +84,72 @@ function PermissionPrompt({
 /** 权限通过后的内容：数据 hook + limited 条幅 + 网格 + 查看器。 */
 function PhotoLibraryContent({
   limited,
+  onRequestFullAccess,
   onViewerOpenChange,
 }: {
   limited: boolean;
+  /** limited 下点击「开启完整访问」：再次请求系统授权（iOS 17+ 弹升级框）。 */
+  onRequestFullAccess: () => void;
   onViewerOpenChange?: (open: boolean) => void;
 }) {
   const { items, loading, refreshing, error, loadMore, refresh } = usePhotoAlbum();
   const [viewer, setViewer] = useState<{ index: number; rect: Rect } | null>(null);
 
+  // 「开启完整访问」请求后的 limited 变化跟踪：iOS 17+ 系统会弹「允许访问所有照片」
+  // 升级框（limited→full 后照片全量显示；视频受 iOS 18+ 限制仍不可预览）；
+  // iOS 16 及更早再次请求不弹框（仍 limited），此时自动跳系统设置手动切换。
+  const [pendingFullAccess, setPendingFullAccess] = useState(false);
+  const prevLimited = useRef(limited);
+  useEffect(() => {
+    if (!pendingFullAccess) {
+      prevLimited.current = limited;
+      return;
+    }
+    if (limited && Number(Platform.Version) < 17) {
+      Linking.openSettings();
+    }
+    setPendingFullAccess(false);
+    prevLimited.current = limited;
+  }, [limited, pendingFullAccess]);
+
   // 打开/关闭查看器时同步通知宿主：查看器打开期间个人面板禁用下滑/点击关闭，
   // 避免 overFullScreen 透明 Modal 层叠的触摸穿透误关面板（查看器关闭后恢复）。
-  const openViewer = (index: number, rect: Rect) => {
-    setViewer({ index, rect });
-    onViewerOpenChange?.(true);
-  };
-  const closeViewer = () => {
+  // useCallback 稳定引用：PhotoGrid 的 memo Cell 依赖它做重渲染跳过。
+  const openViewer = useCallback(
+    (index: number, rect: Rect) => {
+      setViewer({ index, rect });
+      onViewerOpenChange?.(true);
+    },
+    [onViewerOpenChange]
+  );
+  const closeViewer = useCallback(() => {
     setViewer(null);
     onViewerOpenChange?.(false);
-  };
+  }, [onViewerOpenChange]);
 
   return (
     <>
       {limited && (
         <View style={styles.limitedBanner}>
-          <ThemedText type="small" themeColor="textSecondary">
+          <ThemedText type="small" themeColor="textSecondary" style={styles.limitedText}>
             仅显示选中的照片
           </ThemedText>
-          <Pressable onPress={() => presentPermissionsPicker()}>
-            <ThemedText type="linkPrimary">管理…</ThemedText>
-          </Pressable>
+          <View style={styles.limitedActions}>
+            {/* 开启完整访问：再次请求系统授权。iOS 17+ 弹「允许访问所有照片」升级框；
+                iOS 16 及更早不弹框（仍 limited），由上方 effect 自动跳系统设置。 */}
+            <Pressable
+              onPress={() => {
+                setPendingFullAccess(true);
+                onRequestFullAccess();
+              }}
+            >
+              <ThemedText type="linkPrimary">开启完整访问</ThemedText>
+            </Pressable>
+            {/* 管理…：iOS 系统「选中的照片」勾选器，可追加授权具体照片/视频 */}
+            <Pressable onPress={() => presentPermissionsPicker()}>
+              <ThemedText type="linkPrimary">管理…</ThemedText>
+            </Pressable>
+          </View>
         </View>
       )}
 
@@ -174,6 +215,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    gap: Spacing.two,
     paddingVertical: Spacing.two,
+  },
+  limitedText: {
+    flexShrink: 1,
+  },
+  limitedActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.three,
   },
 });

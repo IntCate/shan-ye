@@ -5,13 +5,13 @@
  * 点击侧边按钮组「我的」按钮后，以 iOS 风格底部卡片从屏幕底部向上滑出。
  *
  * 两段式交互：
- * - 收起态（默认打开）：仅展示头像 + 昵称 + 统计数据（照片数/路径数/地点数）。
- *   向上拖拽 → 展开；点击「照片」/「路径」/「地点」统计项 → 直接展开到对应列表。
+ * - 收起态（默认打开）：仅展示头像 + 昵称 + 统计数据（照片数/路径数/标点数）。
+ *   向上拖拽 → 展开；点击「照片」/「路径」/「标点」统计项 → 直接展开到对应列表。
  * - 展开态：内容随 section 动态切换——
  *   'map'（拖拽上滑默认）：地图模式选择器（横向样图卡片，上图下名，选中项蓝边框）；
  *   'photos'：完整图库（原图库页迁入：设备相册照片/视频网格 + 查看器）；
  *   'routes'：路径管理（原右侧按钮组「路径」按钮功能迁移至此：导入 / 显隐 / 坐标模式 / 删除 / 点击定位）。
- *   'places'：收藏地点列表（长按地图保存的坐标：点击定位 / 删除）。
+ *   'placemarks'：收藏标点列表（长按地图保存的坐标：点击定位 / 删除）。
  *   向下拖拽超过阈值 → 回到收起态；长拖（超过收起→关闭行程中点）或用力下甩 → 直接关闭面板。
  *
  * translateY 模型（卡片 bottom:0，高度动态=cardHeight，正值向下移动）：
@@ -34,6 +34,7 @@ import { Easing, cancelAnimation, runOnJS, useSharedValue, withTiming } from 're
 
 import { PhotoLibrary } from '@/components/photo-album/photo-library';
 import { LoginSheet } from '@/components/login-sheet';
+import { RenameRouteSheet } from '@/components/rename-route-sheet';
 import { liquidGlassAvailable } from '@/components/glass-panel';
 import { ThemedText } from '@/components/themed-text';
 import { BottomSheetModal } from '@/components/ui/bottom-sheet-modal';
@@ -49,12 +50,12 @@ import {
 import { useTheme } from '@/hooks/use-theme';
 import { maskPhone, type User } from '@/hooks/use-auth';
 import type { MapType } from '@/types/map';
-import type { Place } from '@/types/place';
+import type { Placemark } from '@/types/placemark';
 import type { Route } from '@/types/route';
 import { formatLatLng } from '@/utils/geo';
 
-/** 扩展态内容类型：地图模式选择（默认）/ 照片列表 / 路径列表 / 地点列表。 */
-type ExpandedSection = 'map' | 'photos' | 'routes' | 'places';
+/** 扩展态内容类型：地图模式选择（默认）/ 照片列表 / 路径列表 / 标点列表。 */
+type ExpandedSection = 'map' | 'photos' | 'routes' | 'placemarks';
 
 /** 地图模式选项：图标 + 名称 + value。图标用 SF Symbols，无需外部图片资源。
  *  样图背景色取各模式典型底色，视觉上近似 iOS Maps 的模式选择器缩略图。
@@ -107,8 +108,8 @@ export function ProfileSheet({
   photoCount,
   routeCount,
   routes,
-  placeCount,
-  places,
+  placemarkCount,
+  placemarks,
   mapType,
   onMapTypeChange,
   routeLoading,
@@ -117,10 +118,11 @@ export function ProfileSheet({
   onToggleRoute,
   onCycleCoordMode,
   onRemoveRoute,
+  onRenameRoute,
   onSelectRoute,
   onDismissRouteError,
-  onRemovePlace,
-  onSelectPlace,
+  onRemovePlacemark,
+  onSelectPlacemark,
   onLogin,
   onLogout,
   onClose,
@@ -133,10 +135,10 @@ export function ProfileSheet({
   routeCount: number;
   /** 已导入的路径列表，扩展态「路径」标签页展示。 */
   routes: Route[];
-  /** 收藏地点总数（统计项「地点」显示）。 */
-  placeCount: number;
-  /** 收藏地点列表，扩展态「地点」标签页展示。 */
-  places: Place[];
+  /** 收藏标点总数（统计项「标点」显示）。 */
+  placemarkCount: number;
+  /** 收藏标点列表，扩展态「标点」标签页展示。 */
+  placemarks: Placemark[];
   mapType: MapType;
   onMapTypeChange: (type: MapType) => void;
   /** 是否正在导入路径文件（显示加载指示）。 */
@@ -151,14 +153,16 @@ export function ProfileSheet({
   onCycleCoordMode: (id: string) => void;
   /** 删除某条路线。 */
   onRemoveRoute: (id: string) => void;
+  /** 重命名某条路线（新名称由重命名弹层确认后回调）。 */
+  onRenameRoute: (id: string, newName: string) => void;
   /** 点击路线名称：定位地图到该路线包围盒。 */
   onSelectRoute: (route: Route) => void;
   /** 关闭错误提示。 */
   onDismissRouteError: () => void;
-  /** 删除某个收藏地点。 */
-  onRemovePlace: (id: string) => void;
-  /** 点击地点名称：定位地图到该坐标。 */
-  onSelectPlace: (place: Place) => void;
+  /** 删除某个收藏标点。 */
+  onRemovePlacemark: (id: string) => void;
+  /** 点击标点名称：定位地图到该坐标。 */
+  onSelectPlacemark: (placemark: Placemark) => void;
   /** 登录成功回调（登录面板内完成校验，携带用户信息）。 */
   onLogin: (user: User) => void;
   /** 退出登录。 */
@@ -197,6 +201,8 @@ export function ProfileSheet({
   // 登录面板是否打开：作为二级面板嵌套渲染在本 Modal 内（与照片查看器同理），
   // 避免两个顶层原生 Modal 同时 present 触发 UIKit "already presenting" 崩溃。
   const [loginVisible, setLoginVisible] = useState(false);
+  // 重命名弹层目标路径：非 null 时打开重命名面板（同样嵌套渲染在本 Modal 内）。
+  const [renamingRoute, setRenamingRoute] = useState<Route | null>(null);
 
   // 查看器打开期间忽略一切关闭请求（tapArea 点击关闭经 onDismiss 走此函数）
   const guardedClose = useCallback(() => {
@@ -379,7 +385,7 @@ export function ProfileSheet({
                       : user.provider === 'wechat'
                         ? '微信快捷登录'
                         : 'QQ 快捷登录'
-                    : '点击登录，开启轨迹与地点同步'}
+                    : '点击登录，开启轨迹与标点同步'}
                 </ThemedText>
                 {user && (
                   <Pressable onPress={onLogout} hitSlop={8} accessibilityLabel="退出登录">
@@ -411,12 +417,12 @@ export function ProfileSheet({
                 </Pressable>
                 <View style={styles.statDivider} />
                 <Pressable
-                  onPress={() => expand('places')}
+                  onPress={() => expand('placemarks')}
                   style={({ pressed }) => [styles.statItem, pressed && styles.pressed]}
                   accessibilityRole="button"
-                  accessibilityLabel={`${placeCount} 个地点`}>
-                  <ThemedText type="smallBold" style={styles.statValue}>{placeCount}</ThemedText>
-                  <ThemedText type="small" themeColor="textSecondary">地点</ThemedText>
+                  accessibilityLabel={`${placemarkCount} 个标点`}>
+                  <ThemedText type="smallBold" style={styles.statValue}>{placemarkCount}</ThemedText>
+                  <ThemedText type="small" themeColor="textSecondary">标点</ThemedText>
                 </Pressable>
               </View>
             </View>
@@ -486,7 +492,7 @@ export function ProfileSheet({
                     ) : (
                       <SymbolView
                         name={{ ios: 'folder.badge.plus', android: 'folder_open', web: 'folder_open' }}
-                        size={20}
+                        size={24}
                         tintColor={iconTint}
                       />
                     )}
@@ -535,7 +541,7 @@ export function ProfileSheet({
                                 ? { ios: 'eye', android: 'visibility', web: 'visibility' }
                                 : { ios: 'eye.slash', android: 'visibility_off', web: 'visibility_off' }
                             }
-                            size={18}
+                            size={20}
                             tintColor={iconTint}
                           />
                         </Pressable>
@@ -545,7 +551,10 @@ export function ProfileSheet({
                           style={({ pressed }) => [styles.routeNameBtn, pressed && styles.pressed]}
                           accessibilityRole="button"
                           accessibilityLabel={`定位到 ${r.name}`}>
-                          <ThemedText type="small" numberOfLines={1} style={!r.visible && styles.hiddenName}>
+                          <ThemedText
+                            type="small"
+                            numberOfLines={1}
+                            style={[styles.routeName, !r.visible && styles.hiddenName]}>
                             {r.name}
                           </ThemedText>
                         </Pressable>
@@ -565,7 +574,7 @@ export function ProfileSheet({
                           }>
                           <SymbolView
                             name={{ ios: 'globe', android: 'public', web: 'public' }}
-                            size={16}
+                            size={18}
                             tintColor={
                               r.coordMode === 'toWgs84'
                                 ? r.color
@@ -573,6 +582,19 @@ export function ProfileSheet({
                                   ? '#34C759'
                                   : iconTint
                             }
+                          />
+                        </Pressable>
+                        {/* 重命名 */}
+                        <Pressable
+                          onPress={() => setRenamingRoute(r)}
+                          hitSlop={Spacing.one}
+                          style={({ pressed }) => [styles.routeActionBtn, pressed && styles.pressed]}
+                          accessibilityRole="button"
+                          accessibilityLabel={`重命名 ${r.name}`}>
+                          <SymbolView
+                            name={{ ios: 'pencil', android: 'edit', web: 'edit' }}
+                            size={18}
+                            tintColor={iconTint}
                           />
                         </Pressable>
                         {/* 删除 */}
@@ -584,7 +606,7 @@ export function ProfileSheet({
                           accessibilityLabel={`删除 ${r.name}`}>
                           <SymbolView
                             name={{ ios: 'trash', android: 'delete', web: 'delete' }}
-                            size={16}
+                            size={18}
                             tintColor={iconTint}
                           />
                         </Pressable>
@@ -594,27 +616,27 @@ export function ProfileSheet({
                 )}
               </View>
             )}
-            {section === 'places' && (
+            {section === 'placemarks' && (
               <View style={styles.expandedContent}>
                 {/* 标题行：标题左、提示右 */}
                 <View style={styles.routesHeader}>
                   <ThemedText type="smallBold">
-                    地点（{placeCount}）
+                    标点（{placemarkCount}）
                   </ThemedText>
                 </View>
 
-                {places.length === 0 ? (
+                {placemarks.length === 0 ? (
                   <ThemedText type="small" themeColor="textSecondary" style={styles.emptyText}>
-                    暂无收藏地点，长按地图任意位置即可保存
+                    暂无收藏标点，长按地图任意位置即可保存
                   </ThemedText>
                 ) : (
                   <ScrollView style={styles.photoList} bounces={false}>
-                    {places.map((p) => (
-                      <View key={p.id} style={styles.placeRow}>
-                        <View style={styles.placeNameRow}>
-                          {/* 地点名称：点击定位 */}
+                    {placemarks.map((p) => (
+                      <View key={p.id} style={styles.placemarkRow}>
+                        <View style={styles.placemarkNameRow}>
+                          {/* 标点名称：点击定位 */}
                           <Pressable
-                            onPress={() => onSelectPlace(p)}
+                            onPress={() => onSelectPlacemark(p)}
                             style={({ pressed }) => [styles.routeNameBtn, pressed && styles.pressed]}
                             accessibilityRole="button"
                             accessibilityLabel={`定位到 ${p.name}`}>
@@ -622,7 +644,7 @@ export function ProfileSheet({
                           </Pressable>
                           {/* 删除 */}
                           <Pressable
-                            onPress={() => onRemovePlace(p.id)}
+                            onPress={() => onRemovePlacemark(p.id)}
                             hitSlop={Spacing.one}
                             style={({ pressed }) => [styles.routeActionBtn, pressed && styles.pressed]}
                             accessibilityRole="button"
@@ -655,6 +677,16 @@ export function ProfileSheet({
           setLoginVisible(false);
         }}
         onClose={() => setLoginVisible(false)}
+      />
+      {/* 重命名弹层：与登录面板同模式嵌套渲染 */}
+      <RenameRouteSheet
+        visible={renamingRoute !== null}
+        currentName={renamingRoute?.name ?? ''}
+        onConfirm={(name) => {
+          if (renamingRoute) onRenameRoute(renamingRoute.id, name);
+          setRenamingRoute(null);
+        }}
+        onClose={() => setRenamingRoute(null)}
       />
     </BottomSheetModal>
   );
@@ -735,7 +767,7 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.two,
   },
   importBtn: {
-    padding: Spacing.half,
+    padding: Spacing.two,
   },
   /** 错误条：红字 + 关闭按钮 */
   routeErrorBar: {
@@ -763,12 +795,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.two,
-    paddingVertical: Spacing.two,
+    paddingVertical: Spacing.three,
   },
   routeColorDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
+    width: 14,
+    height: 14,
+    borderRadius: 7,
   },
   /** 行内操作小按钮（显隐 / 坐标模式 / 删除） */
   routeActionBtn: {
@@ -778,16 +810,21 @@ const styles = StyleSheet.create({
   routeNameBtn: {
     flex: 1,
   },
+  /** 路线名称：字号放大至 16 便于阅读与点击 */
+  routeName: {
+    fontSize: 16,
+    lineHeight: 22,
+  },
   /** 隐藏路线名称降低对比度（但仍可读，标识其隐藏状态） */
   hiddenName: {
     opacity: 0.5,
   },
-  /** 地点列表行：名称行 + 坐标小字两段式 */
-  placeRow: {
+  /** 标点列表行：名称行 + 坐标小字两段式 */
+  placemarkRow: {
     paddingVertical: Spacing.two,
     gap: Spacing.half,
   },
-  placeNameRow: {
+  placemarkNameRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.two,

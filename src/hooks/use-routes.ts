@@ -30,7 +30,7 @@ import { parseRouteFile, ROUTE_COLORS } from '@/utils/route-parser';
 import { gcj02ToWgs84, wgs84ToGcj02, withConvertedCoords } from '@/utils/coord-transform';
 import type { CoordMode, Route, RoutePoint } from '@/types/route';
 
-export type UseRoutesResult = {
+type UseRoutesResult = {
   routes: Route[];
   loading: boolean;
   error: string | null;
@@ -38,6 +38,8 @@ export type UseRoutesResult = {
   importRoute: () => Promise<Route[] | null>;
   /** 把应用内绘制的轨迹点保存为一条路线（format: 'record'），并入路径列表。 */
   addRecordedRoute: (points: RoutePoint[]) => void;
+  /** 重命名某条路线（空名忽略）。 */
+  renameRoute: (id: string, newName: string) => void;
   /** 切换某条路线的显隐。 */
   toggleRoute: (id: string) => void;
   /** 循环切换坐标模式：raw → toWgs84 → toGcj02 → raw，用于修正坐标系不匹配偏移。 */
@@ -141,6 +143,16 @@ export function useRoutes(): UseRoutesResult {
     commit(routesRef.current.filter((r) => r.id !== id));
   }, [commit]);
 
+  /** 重命名路线：去除首尾空格，空名忽略。 */
+  const renameRoute = useCallback(
+    (id: string, newName: string) => {
+      const name = newName.trim();
+      if (!name) return;
+      commit(routesRef.current.map((r) => (r.id === id ? { ...r, name } : r)));
+    },
+    [commit]
+  );
+
   /** 绘制轨迹保存为路线：单段、坐标模式 raw、颜色按已有数量循环分配。 */
   const addRecordedRoute = useCallback(
     (points: RoutePoint[]) => {
@@ -169,6 +181,7 @@ export function useRoutes(): UseRoutesResult {
     error,
     importRoute,
     addRecordedRoute,
+    renameRoute,
     toggleRoute,
     cycleCoordMode,
     removeRoute,

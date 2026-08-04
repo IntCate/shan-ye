@@ -24,7 +24,7 @@ import type { MapRegion } from '@/types/map';
 export type PhotoClusterItem = GeoTaggedPhoto | PhotoCluster;
 
 /** 聚类半径（像素）：两标记点在屏幕上距离小于该值则聚合为簇。 */
-export const PHOTO_CLUSTER_RADIUS_PX = 80;
+const PHOTO_CLUSTER_RADIUS_PX = 80;
 /** 视口外缓冲（视口宽/高的倍数）：预渲染周边一圈，拖拽时标记不闪没。 */
 const VIEWPORT_BUFFER = 0.5;
 

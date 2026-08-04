@@ -1,9 +1,9 @@
 /**
- * 地图长按「保存地点」悬浮卡片：红点 + 坐标卡片（可编辑名称），底部「添加 / 收藏」保存、「取消」关闭。
+ * 地图长按「保存标点」悬浮卡片：红点 + 坐标卡片（可编辑名称），底部「添加 / 收藏」保存、「取消」关闭。
  *
- * 长按地图空白时由首页挂载；红点标记长按点，玻璃坐标卡片悬浮在红点上方（BubbleTail 尾巴指向红点），
+ * 长按地图空白时由首页挂载；红点标记长按位置，玻璃坐标卡片悬浮在红点上方（BubbleTail 尾巴指向红点），
  * 定位使用长按点的 MapView 内像素坐标（x/y），与地图容器同基准。
- * 「添加」「收藏」为同一地点列表的两种入口（收藏带星标语义），均保存当前坐标；
+ * 「添加」「收藏」为同一标点列表的两种入口（收藏带星标语义），均保存当前坐标；
  * 点击地图空白、地图移动或取消时关闭。卡片外区域 pointerEvents 穿透，点击落到地图（触发 onPress 关闭）。
  */
 
@@ -22,13 +22,13 @@ import { formatLatLng } from '@/utils/geo';
 const DOT_SIZE = 12;
 const DOT_RADIUS = DOT_SIZE / 2;
 
-type MapSavePlaceCardProps = {
+type MapSavePlacemarkCardProps = {
   latitude: number;
   longitude: number;
   /** 长按点在 MapView 内的像素坐标（相对地图容器，卡片与红点据此定位）。 */
   x: number;
   y: number;
-  /** 名称初始值（默认「地点 N」）。 */
+  /** 名称初始值（默认「标点 N」）。 */
   defaultName: string;
   onSave: (name: string) => void;
   onClose: () => void;
@@ -41,7 +41,7 @@ const FAVORITE_ORANGE = '#FF9F0A';
 /** 取消按钮主色（iOS 系统灰）。 */
 const CANCEL_GRAY = '#8E8E93';
 
-export function MapSavePlaceCard({
+export function MapSavePlacemarkCard({
   latitude,
   longitude,
   x,
@@ -49,7 +49,7 @@ export function MapSavePlaceCard({
   defaultName,
   onSave,
   onClose,
-}: MapSavePlaceCardProps) {
+}: MapSavePlacemarkCardProps) {
   const theme = useTheme();
   const isDark = useColorScheme() === 'dark';
   const [name, setName] = useState(defaultName);
@@ -67,7 +67,7 @@ export function MapSavePlaceCard({
       <View style={[styles.cardWrap, { left: x, top: y - DOT_RADIUS - Spacing.two }]}>
         <GlassPanel style={styles.cardOuter} contentStyle={styles.cardContent}>
           <View style={styles.header}>
-            <ThemedText type="smallBold">保存为地点</ThemedText>
+            <ThemedText type="smallBold">保存为标点</ThemedText>
             <Pressable onPress={onClose} hitSlop={8} accessibilityLabel="关闭">
               <SymbolView
                 name="xmark"
@@ -84,7 +84,7 @@ export function MapSavePlaceCard({
           <TextInput
             value={name}
             onChangeText={setName}
-            placeholder="地点名称"
+            placeholder="标点名称"
             placeholderTextColor={theme.textSecondary}
             style={[styles.input, { color: theme.text, backgroundColor: theme.backgroundElement }]}
             autoCorrect={false}

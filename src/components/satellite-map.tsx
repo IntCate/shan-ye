@@ -35,8 +35,10 @@ import { ThemedView } from '@/components/themed-view';
 import { Shadow } from '@/constants/theme';
 import { useHeading } from '@/hooks/use-heading';
 import { clusterPhotos, type PhotoClusterItem } from '@/utils/cluster';
+import { formatLatLng } from '@/utils/geo';
 import type { GeoTaggedPhoto, PhotoCluster } from '@/types/geotagged-photo';
 import type { GeoPoint, MapMarker, MapRegion, SatelliteMapHandle, SatelliteMapProps } from '@/types/map';
+import type { Placemark } from '@/types/placemark';
 import type { Route } from '@/types/route';
 
 /** animateToRegion 默认动画时长（ms）。 */
@@ -54,6 +56,15 @@ const PHOTO_MARKER_ANCHOR = { x: 0.5, y: 1 } as const;
 const PHOTO_MARKER_CENTER_OFFSET = { x: 0, y: -PHOTO_MARKER_TOTAL_HEIGHT / 2 } as const;
 /** 照片簇数量徽标直径（px），叠在缩略图右下角。 */
 const CLUSTER_BADGE_SIZE = 22;
+
+/** 标点 Marker 圆点直径（px）。 */
+const PLACEMARK_SIZE = 12;
+/** 标点 Marker 透明点击区域尺寸（px）：放大可点面积，内部居中放置小圆点。 */
+const PLACEMARK_HIT_SIZE = 24;
+/** 标点 Marker 锚点：圆点中心落坐标。 */
+const PLACEMARK_ANCHOR = { x: 0.5, y: 0.5 } as const;
+/** 标点颜色：收藏语义橙，与保存卡片「收藏」按钮同色。 */
+const PLACEMARK_COLOR = '#FF9F0A';
 
 /** 搜索 Marker 组：点击地图空白或长按后展示的搜索结果大头针（末个默认弹 Callout）。
  *  React.memo 隔离：仅 markers 引用或 lastMarkerRef 变化才重渲染。 */
@@ -100,6 +111,43 @@ const SearchMarkers = memo(function SearchMarkers({
  *  Android tracksViewChanges：Marker 默认 true 会持续追踪自定义视图变化，量大时卡顿。
  *  图片加载完成前保持追踪（灰底占位 → 图片渲染），onLoad 后置 false 做最终快照停止追踪。
  *  iOS Apple Maps 忽略该 prop，视图为活视图。 */
+
+/** 收藏标点组：橙色小圆点（白边 + 轻阴影）外扩 24pt 透明点击区，点击弹 Callout 显示名称与坐标。
+ *  锚点取圆点中心，坐标落点即圆点中心（与保存卡片红点同语义）。
+ *  React.memo 隔离：仅 placemarks 引用变化才重渲染。 */
+const PlacemarkMarkers = memo(function PlacemarkMarkers({
+  placemarks,
+}: {
+  placemarks: Placemark[];
+}) {
+  return (
+    <>
+      {placemarks.map((p) => (
+        <Marker
+          key={p.id}
+          coordinate={{ latitude: p.latitude, longitude: p.longitude }}
+          anchor={PLACEMARK_ANCHOR}
+          tracksViewChanges={false}>
+          <View style={styles.placemarkHit}>
+            <View style={styles.placemarkDot} />
+          </View>
+          <Callout>
+            <ThemedView type="backgroundElement" style={styles.callout}>
+              <ThemedText type="smallBold" numberOfLines={1}>
+                {p.name}
+              </ThemedText>
+              <ThemedText type="small" themeColor="textSecondary" numberOfLines={1}>
+                {formatLatLng(p.latitude, p.longitude).lat} /{' '}
+                {formatLatLng(p.latitude, p.longitude).lng}
+              </ThemedText>
+            </ThemedView>
+          </Callout>
+        </Marker>
+      ))}
+    </>
+  );
+});
+
 const PhotoMarkers = memo(function PhotoMarkers({
   photoMarkers,
   onPhotoPress,
@@ -206,6 +254,7 @@ export const SatelliteMap = forwardRef<SatelliteMapHandle, SatelliteMapProps>(fu
     mapType = 'hybrid',
     markers = [],
     photoMarkers = [],
+    placemarks = [],
     routes = [],
     onPhotoPress,
     onClusterPress,
@@ -314,6 +363,8 @@ export const SatelliteMap = forwardRef<SatelliteMapHandle, SatelliteMapProps>(fu
         onClusterPress={onClusterPress}
       />
 
+      <PlacemarkMarkers placemarks={placemarks} />
+
       <RoutePolylines routes={routes} />
 
       {/* 朝向锥形指示器（heading cone）：叠加在系统定位蓝点上，半透明蓝色光束指示设备朝向。
@@ -336,6 +387,23 @@ const styles = StyleSheet.create({
   /** 照片 Marker 容器：图片在上、尾巴在下，水平居中对齐。 */
   photoMarkerWrap: {
     alignItems: 'center',
+  },
+  /** 标点 Marker 透明点击区：放大可点面积，内部居中放置小圆点。 */
+  placemarkHit: {
+    width: PLACEMARK_HIT_SIZE,
+    height: PLACEMARK_HIT_SIZE,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  /** 标点 Marker 圆点：橙色 + 白边 + 轻阴影，与保存卡片「收藏」按钮同色。 */
+  placemarkDot: {
+    width: PLACEMARK_SIZE,
+    height: PLACEMARK_SIZE,
+    borderRadius: PLACEMARK_SIZE / 2,
+    backgroundColor: PLACEMARK_COLOR,
+    borderWidth: 2,
+    borderColor: '#ffffff',
+    ...Shadow.sm,
   },
   /** 照片 Marker 图片：圆角方图 + 白色描边 + 轻阴影。尺寸须与 PHOTO_MARKER_SIZE 一致，
    *  以保证 iOS centerOffset 的偏移量计算正确（尾巴尖落点）。 */

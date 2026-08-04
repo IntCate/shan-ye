@@ -15,7 +15,7 @@ import * as Location from 'expo-location';
 
 import type { GeoPoint } from '@/types/map';
 
-export type LocationState = {
+type LocationState = {
   /** 单次定位：返回当前位置；权限拒绝/定位失败返回 null。 */
   requestAndLocate: () => Promise<GeoPoint | null>;
 };

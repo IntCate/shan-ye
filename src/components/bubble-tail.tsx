@@ -10,7 +10,7 @@
 
 import { StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 
-export type TailDirection = 'up' | 'down' | 'left' | 'right';
+type TailDirection = 'up' | 'down' | 'left' | 'right';
 
 type BubbleTailProps = {
   /** 尾巴尖端指向的方向。 */

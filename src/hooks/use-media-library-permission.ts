@@ -8,6 +8,13 @@
 
 import { usePermissions } from 'expo-media-library';
 
+/**
+ * 注意：usePermissions() 默认（writeOnly=false）即请求「完整相册访问」——
+ * iOS 弹窗由系统呈现，用户可选择「允许访问所有照片」或「选中的照片」（limited）。
+ * limited 下仅用户勾选的资源可读：视频内容（AVPlayer 音轨/字幕轨）读取会报
+ * Code=257 无权限警告，需用户升级为完整访问（iOS 17+ 再次 requestPermission
+ * 弹升级框，或系统设置切换），详见 photo-library.tsx 的 limited 条幅。
+ */
 export function useMediaLibraryPermission() {
   const [permission, requestPermission] = usePermissions();
   return {

@@ -1,9 +1,12 @@
 /**
  * 相册数据层 hook。
  *
- * 负责：分页 Query 查询设备图片+视频（按创建时间倒序），并把每个 Asset 的异步 getter
- * （getUri/getMediaType/getWidth/getHeight/getCreationTime/getDuration）批量物化为同步
+ * 负责：分页 Query 查询设备图片（按创建时间倒序），并把每个 Asset 的异步 getter
+ * （getUri/getMediaType/getWidth/getHeight/getCreationTime）批量物化为同步
  * PhotoItem，供网格与查看器直接渲染。
+ *
+ * 只查询图片（MediaType.IMAGE）：iOS 18+ 真机上 AVPlayer 读取相册视频被系统拒绝
+ * （expo issue #31620，Code=257），视频缩略图/播放均不可用，故数据层直接跳过视频。
  *
  * SDK 57 关键点：Asset 同步属性只剩 id，uri/尺寸/类型全为异步 getter，故用 Promise.allSettled
  * 并发取值；单条 asset 取值失败不影响整页（filter 掉 null）。
@@ -40,22 +43,21 @@ export function usePhotoAlbum() {
 
     try {
       const assets = await new Query()
-        .within(AssetField.MEDIA_TYPE, [MediaType.IMAGE, MediaType.VIDEO])
+        .within(AssetField.MEDIA_TYPE, [MediaType.IMAGE])
         .orderBy({ key: AssetField.CREATION_TIME, ascending: false })
         .limit(MEDIA_PAGE_SIZE)
         .offset(offset)
         .exe();
 
       const pageItems = await materializeAssets(assets, async (a): Promise<PhotoItem | null> => {
-        const [uri, mediaType, width, height, creationTime, duration] = await Promise.all([
+        const [uri, mediaType, width, height, creationTime] = await Promise.all([
           a.getUri(),
           a.getMediaType(),
           a.getWidth(),
           a.getHeight(),
           a.getCreationTime(),
-          a.getDuration(),
         ]);
-        if (mediaType !== MediaType.IMAGE && mediaType !== MediaType.VIDEO) return null;
+        if (mediaType !== MediaType.IMAGE) return null;
         return {
           asset: a,
           id: a.id,
@@ -64,7 +66,7 @@ export function usePhotoAlbum() {
           width,
           height,
           creationTime: creationTime ?? 0,
-          duration,
+          duration: null,
         };
       });
 

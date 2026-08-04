@@ -10,13 +10,15 @@
  * 解析到自身导致循环引用；与 use-geotagged-photos.web.ts 同模式。
  */
 
-import type { Route } from '@/types/route';
+import type { Route, RoutePoint } from '@/types/route';
 
 export function useRoutes(): {
   routes: Route[];
   loading: boolean;
   error: string | null;
   importRoute: () => Promise<Route[] | null>;
+  addRecordedRoute: (points: RoutePoint[]) => void;
+  renameRoute: (id: string, newName: string) => void;
   toggleRoute: (id: string) => void;
   cycleCoordMode: (id: string) => void;
   removeRoute: (id: string) => void;
@@ -27,6 +29,8 @@ export function useRoutes(): {
     loading: false,
     error: null,
     importRoute: () => Promise.resolve(null),
+    addRecordedRoute: () => {},
+    renameRoute: () => {},
     toggleRoute: () => {},
     cycleCoordMode: () => {},
     removeRoute: () => {},

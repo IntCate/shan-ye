@@ -12,7 +12,7 @@ import { NOMINATIM_RATE_LIMIT_MS, SEARCH_DEBOUNCE_MS } from '@/constants/map';
 import { GeocodeError, searchAddress } from '@/services/geocode';
 import type { SearchResult } from '@/types/map';
 
-export type GeocodeSearchState = {
+type GeocodeSearchState = {
   results: SearchResult[];
   loading: boolean;
   error: string | null;

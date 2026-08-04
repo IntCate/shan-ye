@@ -7,7 +7,7 @@
  * - 定位失败：回退到默认坐标（INITIAL_REGION）
  *
  * 地图交互：
- * - 长按空白：显示红点 + 悬浮坐标卡片（含名称输入与「添加/收藏」按钮），确认后加入收藏地点
+ * - 长按空白：显示红点 + 悬浮坐标卡片（含名称输入与「添加/收藏」按钮），确认后加入收藏标点
  * - 单击空白：清空 Marker 与浮动卡片
  * - 搜索框：输入地址跳转并落 Marker
  * - 定位按钮：跳回当前位置
@@ -20,10 +20,11 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import { Asset, requestPermissionsAsync as requestMediaLibraryPermissionsAsync } from 'expo-media-library';
 
+import { AltitudeSheet } from '@/components/altitude-sheet';
 import { MapFloatingButton } from '@/components/map-floating-button';
 import { MapLayerMenu, type LayerKey } from '@/components/map-layer-menu';
-import { MapSavePlaceCard } from '@/components/map-save-place-card';
-import { MapSearchBar } from '@/components/map-search-bar';
+import { MapSavePlacemarkCard } from '@/components/map-save-placemark-card';
+import { MapSearchBar, type MapSearchBarHandle } from '@/components/map-search-bar';
 import { PhotoDetailSheet } from '@/components/photo-detail-sheet';
 import { ProfileSheet } from '@/components/profile-sheet';
 import { SatelliteMap } from '@/components/satellite-map';
@@ -37,7 +38,7 @@ import { useLocation } from '@/hooks/use-location';
 import { useMediaCount } from '@/hooks/use-media-count';
 import { useAuth } from '@/hooks/use-auth';
 import { useRoutes } from '@/hooks/use-routes';
-import { usePlaces } from '@/hooks/use-places';
+import { usePlacemarks } from '@/hooks/use-placemarks';
 import { useTheme } from '@/hooks/use-theme';
 import { useTrackRecorder } from '@/hooks/use-track-recorder';
 import type { GeoTaggedPhoto, PhotoCluster } from '@/types/geotagged-photo';
@@ -50,7 +51,7 @@ import type {
   SatelliteMapHandle,
   UserLocationUpdate,
 } from '@/types/map';
-import type { Place } from '@/types/place';
+import type { Placemark } from '@/types/placemark';
 import type { Route } from '@/types/route';
 import { wgs84ToGcj02, withConvertedCoords } from '@/utils/coord-transform';
 import { getRouteRegion } from '@/utils/route-parser';
@@ -77,8 +78,12 @@ export default function HomeScreen() {
   const [selectedPhoto, setSelectedPhoto] = useState<GeoTaggedPhoto | null>(null);
   // 地图图层类型（标准 / 卫星 / 天气），由「我的」面板切换
   const [mapType, setMapType] = useState<MapType>('hybrid');
-  // 图层显隐开关（多选）：控制地图上路径 / 照片是否显示，由图层多选器切换
-  const [layers, setLayers] = useState<Record<LayerKey, boolean>>({ routes: true, photos: true });
+  // 图层显隐开关（多选）：控制地图上路径 / 照片 / 标点是否显示，由图层多选器切换
+  const [layers, setLayers] = useState<Record<LayerKey, boolean>>({
+    routes: true,
+    photos: true,
+    placemarks: true,
+  });
   // 照片 EXIF GPS 为 WGS-84。Apple Maps 卫星图底图用 GCJ-02 但不做内部转换，
   // 需手动 WGS-84 → GCJ-02 对齐底图（中国境外 wgs84ToGcj02 自动跳过）。
   // 矢量图模式（standard 等）由 Apple Maps 内部处理 WGS-84 → GCJ-02，无需手动转换。
@@ -110,21 +115,28 @@ export default function HomeScreen() {
     toggleRoute,
     cycleCoordMode,
     removeRoute,
+    renameRoute,
     clearError,
   } = useRoutes();
   // 「我的」个人中心底部卡片是否展开
   const [profileVisible, setProfileVisible] = useState(false);
   // 登录态：本地模拟认证（AsyncStorage 持久化），「我的」面板头像/昵称展示。
   // 登录面板由 ProfileSheet 内部嵌套渲染（二级面板），登录/退出均经此回调。
-  const { user, hydrated, login, logout } = useAuth();
-  // 收藏地点（长按地图保存的坐标点），会话级内存存储
-  const { places, addPlace, removePlace } = usePlaces();
+  const { user, login, logout } = useAuth();
+  // 收藏标点（长按地图保存的坐标点），会话级内存存储
+  const { placemarks, addPlacemark, removePlacemark } = usePlacemarks();
   // 路径绘制（轨迹录制）：状态机 + GPS 采集由 hook 持有；面板显隐由本页控制（关闭不停止录制）
   const tracker = useTrackRecorder();
   const [trackPanelVisible, setTrackPanelVisible] = useState(false);
-  // 长按地图待保存的地点：坐标 + 长按点像素坐标（null = 不显示）。
-  // 悬浮坐标卡片与红点直接渲染在长按点上方（MapSavePlaceCard 内部实现）。
-  const [savePlaceTarget, setSavePlaceTarget] = useState<{
+  // 海拔高度面板：右侧「海拔高度测速」按钮打开，打开期间由面板内部 GPS 订阅实时刷新
+  const [altitudeVisible, setAltitudeVisible] = useState(false);
+  // 搜索会话激活（聚焦开始 → 选中结果/dismiss 结束）：会话期间隐藏右侧悬浮按钮组。
+  // iOS 键盘避让把搜索框上移、结果列表上展都会进入按钮组区域（按钮固定定位不上移），
+  // 绑定会话而非 blur（iOS 键盘收起触发 blur 但会话未结束），避免按钮恢复后遮住结果列表。
+  const [searchActive, setSearchActive] = useState(false);
+  // 长按地图待保存的标点：坐标 + 长按点像素坐标（null = 不显示）。
+  // 悬浮坐标卡片与红点直接渲染在长按点上方（MapSavePlacemarkCard 内部实现）。
+  const [savePlacemarkTarget, setSavePlacemarkTarget] = useState<{
     latitude: number;
     longitude: number;
     x: number;
@@ -152,7 +164,7 @@ export default function HomeScreen() {
    *  新增地图操作（定位/搜索/其他按钮）只需调 moveMap，无需手动清卡片 / 关浮层。
    *  手势拖拽由 onRegionChange 兜底清除。 */
   const moveMap = useCallback((region: MapRegion, durationMs = 600) => {
-    setSavePlaceTarget(null);
+    setSavePlacemarkTarget(null);
     setLayerMenuVisible(false);
     mapRef.current?.animateToRegion(region, durationMs);
   }, []);
@@ -165,11 +177,11 @@ export default function HomeScreen() {
     [moveMap]
   );
 
-  // 长按地图空白：显示红点 + 悬浮坐标卡片（名称输入 + 添加/收藏按钮，MapSavePlaceCard 实现）。
+  // 长按地图空白：显示红点 + 悬浮坐标卡片（名称输入 + 添加/收藏按钮，MapSavePlacemarkCard 实现）。
   // 地图点击/移动/保存后关闭。
   const handleMapLongPress = useCallback((e: MapLongPressEvent) => {
     setMarkers([]); // 清搜索 Marker
-    setSavePlaceTarget({
+    setSavePlacemarkTarget({
       latitude: e.coordinate.latitude,
       longitude: e.coordinate.longitude,
       x: e.position.x,
@@ -177,26 +189,27 @@ export default function HomeScreen() {
     });
   }, []);
 
-  // 单击地图空白：清空 Marker、保存卡片与图层浮层
+  // 单击地图空白：清空 Marker、保存卡片与图层浮层，并收起搜索（失焦 + 隐藏结果列表）
   const handleMapPress = useCallback(() => {
     setMarkers([]);
-    setSavePlaceTarget(null);
+    setSavePlacemarkTarget(null);
     setLayerMenuVisible(false);
+    searchBarRef.current?.dismiss();
   }, []);
 
   // 手势拖拽/缩放时保存卡片像素坐标失效，需清除；图层浮层一并关闭。
   // 编程移动（定位/搜索）由 moveMap 统一清；此处仅兜底手势场景。
   const handleRegionChange = useCallback(() => {
-    setSavePlaceTarget(null);
+    setSavePlacemarkTarget(null);
     setLayerMenuVisible(false);
   }, []);
 
-  // 个人面板点击地点：定位到该地点（与点击路径定位行为一致，面板保持打开）
-  const handleSelectPlace = useCallback(
-    (place: Place) => {
+  // 个人面板点击标点：定位到该标点（与点击路径定位行为一致，面板保持打开）
+  const handleSelectPlacemark = useCallback(
+    (placemark: Placemark) => {
       moveMap({
-        latitude: place.latitude,
-        longitude: place.longitude,
+        latitude: placemark.latitude,
+        longitude: placemark.longitude,
         latitudeDelta: LOCATE_DELTA,
         longitudeDelta: LOCATE_DELTA,
       });
@@ -232,6 +245,8 @@ export default function HomeScreen() {
   // 确保地图中心与蓝点始终同源、不会因"快照 vs 系统定位"两源不一致而漂移。
   const alignedRef = useRef(false);
   const userLocationRef = useRef<UserLocationUpdate | null>(null);
+  // 搜索框句柄：地图点击等外部操作时收起搜索（失焦 + 隐藏结果列表）
+  const searchBarRef = useRef<MapSearchBarHandle>(null);
 
   const handleLocate = useCallback(async () => {
     // 优先用蓝点最新坐标（与蓝点同源，必然居中）
@@ -305,6 +320,12 @@ export default function HomeScreen() {
 
   // 可见路径（图层总开关为关时为空数组）：稳定引用，避免每次渲染新建数组破坏 RoutePolylines 的 memo 隔离。
   const visibleRoutes = useMemo(() => (layers.routes ? routes : []), [layers.routes, routes]);
+  // 可见标点（图层「标点」为关时为空数组）：稳定引用，避免破坏 PlacemarkMarkers 的 memo 隔离。
+  // 坐标为长按地图取回的原生坐标（与个人面板点击定位同源），无需 GCJ-02 转换。
+  const visiblePlacemarks = useMemo(
+    () => (layers.placemarks ? placemarks : []),
+    [layers.placemarks, placemarks]
+  );
   // 录制中的实时轨迹：作为一条临时 Route（红色）叠加显示，结束后转为正式路线
   const liveRoute = useMemo<Route | null>(() => {
     if (tracker.status === 'idle' || tracker.points.length < 2) return null;
@@ -347,6 +368,7 @@ export default function HomeScreen() {
         mapType={mapType}
         markers={markers}
         photoMarkers={photoMarkers}
+        placemarks={visiblePlacemarks}
         routes={mapRoutes}
         onPhotoPress={setSelectedPhoto}
         onClusterPress={handlePhotoClusterPress}
@@ -361,37 +383,41 @@ export default function HomeScreen() {
       {/* 底部搜索框：位于原 Tab 栏位置，结果列表向上展开（见 MapSearchBar） */}
       <View style={[styles.searchWrap, { bottom: insets.bottom + Spacing.two }]}>
 
-        <MapSearchBar onSelect={handleSelectResult} />
+        <MapSearchBar ref={searchBarRef} onSelect={handleSelectResult} onFocusChange={setSearchActive} />
       </View>
 
-      {/* 长按地图「保存地点」悬浮卡片：红点 + 坐标卡片渲染在长按点上方（内部实现）；
+      {/* 长按地图「保存标点」悬浮卡片：红点 + 坐标卡片渲染在长按点上方（内部实现）；
           地图点击/移动/保存后由 moveMap/handleMapPress 关闭 */}
-      {savePlaceTarget && (
-        <MapSavePlaceCard
-          latitude={savePlaceTarget.latitude}
-          longitude={savePlaceTarget.longitude}
-          x={savePlaceTarget.x}
-          y={savePlaceTarget.y}
-          defaultName={`地点 ${places.length + 1}`}
+      {savePlacemarkTarget && (
+        <MapSavePlacemarkCard
+          latitude={savePlacemarkTarget.latitude}
+          longitude={savePlacemarkTarget.longitude}
+          x={savePlacemarkTarget.x}
+          y={savePlacemarkTarget.y}
+          defaultName={`标点 ${placemarks.length + 1}`}
           onSave={(name) => {
-            addPlace(name, savePlaceTarget.latitude, savePlaceTarget.longitude);
-            setSavePlaceTarget(null);
+            addPlacemark(name, savePlacemarkTarget.latitude, savePlacemarkTarget.longitude);
+            setSavePlacemarkTarget(null);
           }}
           onClose={() => {
-            setSavePlaceTarget(null);
+            setSavePlacemarkTarget(null);
           }}
         />
       )}
 
-      {/* 右下悬浮操作组：我的 / 拍照 / 路径绘制 / 图层 / 定位（自上而下）。
+      {/* 右下悬浮操作组：我的 / 拍照 / 路径绘制 / 海拔高度测速 / 图层 / 定位（自上而下）。
           无底部 Tab：按钮组置于底部搜索框上方（bottom 含 BOTTOM_BAR_OFFSET 偏移）。
-          图层选择器浮层作为本容器的 absolute 子元素，定位到「图层」按钮左侧并垂直居中。 */}
+          图层选择器浮层作为本容器的 absolute 子元素，定位到「图层」按钮左侧并垂直居中。
+          搜索会话激活时整组隐藏（见 searchActive）：iOS 键盘避让把搜索框上移、结果列表上展
+          都会进入按钮组区域，固定定位的按钮组会遮住搜索框/结果列表，故会话期间不渲染。 */}
+      {!searchActive && (
       <View style={[styles.floatingBtns, { bottom: insets.bottom + BOTTOM_BAR_OFFSET }]}>
         <MapFloatingButton
           symbol={{ ios: 'person.fill', android: 'person', web: 'person' }}
           onPress={() => {
-            // 互斥：打开「我的」时关闭图层浮层
+            // 互斥：打开「我的」时关闭图层浮层与海拔面板
             setLayerMenuVisible(false);
+            setAltitudeVisible(false);
             setProfileVisible(true);
           }}
           accessibilityLabel="我的"
@@ -411,9 +437,21 @@ export default function HomeScreen() {
             // 互斥：打开「路径绘制」时关闭图层浮层与个人面板
             setLayerMenuVisible(false);
             setProfileVisible(false);
+            setAltitudeVisible(false);
             setTrackPanelVisible(true);
           }}
           accessibilityLabel="路径绘制"
+        />
+        <MapFloatingButton
+          symbol={{ ios: 'mountain.2.fill', android: 'terrain', web: 'terrain' }}
+          onPress={() => {
+            // 互斥：打开「海拔高度」时关闭图层浮层、个人面板与路径绘制面板
+            setLayerMenuVisible(false);
+            setProfileVisible(false);
+            setTrackPanelVisible(false);
+            setAltitudeVisible(true);
+          }}
+          accessibilityLabel="海拔高度测速"
         />
         {/* 包一层 View 以 onLayout 取「图层」按钮在按钮组内的位置/尺寸，供浮层定位 */}
         <View
@@ -424,7 +462,10 @@ export default function HomeScreen() {
           <MapFloatingButton
             symbol={{ ios: 'square.stack.3d.up.fill', android: 'layers', web: 'layers' }}
             onPress={() => {
-              // 互斥：已打开则仅关闭自己（toggle off）；未打开则展开（多选器常驻）
+              // 互斥：打开「图层」时关闭个人面板与海拔面板
+              setProfileVisible(false);
+              setAltitudeVisible(false);
+              // 已打开则仅关闭自己（toggle off）；未打开则展开（多选器常驻）
               if (layerMenuVisible) {
                 setLayerMenuVisible(false);
               } else {
@@ -460,6 +501,7 @@ export default function HomeScreen() {
           </View>
         )}
       </View>
+      )}
 
       {/* 路径绘制面板：右侧「路径绘制」按钮打开；开始/暂停/继续/结束由面板按钮控制。
           关闭面板不停止录制（hook 在本页持有，GPS 订阅继续），重新打开可查看进度。 */}
@@ -483,11 +525,16 @@ export default function HomeScreen() {
           if (pts.length >= 2) addRecordedRoute(pts);
           setTrackPanelVisible(false);
         }}
+        // 中央主按钮开始后变「拍照」：复用右上角「拍照」逻辑（相机 → 保存相册 → 相册监听增量显示标记）
+        onCapture={handleTakePhoto}
         onClose={() => setTrackPanelVisible(false)}
       />
 
       {/* 照片详情面板：点击地图照片图片 Marker 后从底部滑出 */}
       <PhotoDetailSheet photo={selectedPhoto} onClose={() => setSelectedPhoto(null)} />
+
+      {/* 海拔高度面板：右侧「海拔高度测速」按钮打开；打开期间由面板内部 GPS 订阅实时刷新 */}
+      <AltitudeSheet visible={altitudeVisible} onClose={() => setAltitudeVisible(false)} />
 
       {/* 「我的」个人中心面板：点击「我的」按钮后从底部滑出。
           路径管理（原右侧按钮组「路径」按钮功能）已迁移到「路径」扩展态：
@@ -498,10 +545,10 @@ export default function HomeScreen() {
         photoCount={photoCount}
         routeCount={routes.length}
         routes={routes}
-        placeCount={places.length}
-        places={places}
-        onRemovePlace={removePlace}
-        onSelectPlace={handleSelectPlace}
+        placemarkCount={placemarks.length}
+        placemarks={placemarks}
+        onRemovePlacemark={removePlacemark}
+        onSelectPlacemark={handleSelectPlacemark}
         mapType={mapType}
         onMapTypeChange={setMapType}
         routeLoading={routeLoading}
@@ -515,6 +562,7 @@ export default function HomeScreen() {
         onToggleRoute={toggleRoute}
         onCycleCoordMode={cycleCoordMode}
         onRemoveRoute={removeRoute}
+        onRenameRoute={renameRoute}
         onSelectRoute={(route) => {
           moveMap(getRouteRegion(route));
         }}

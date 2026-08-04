@@ -6,7 +6,7 @@
  */
 
 import { Image } from 'expo-image';
-import { useRef } from 'react';
+import { memo, useRef } from 'react';
 import { Pressable, StyleSheet, type View } from 'react-native';
 
 import type { PhotoItem, Rect } from '@/types/photo-album';
@@ -16,7 +16,8 @@ type Props = {
   onPress: (rect: Rect) => void;
 };
 
-export function PhotoThumbCell({ item, onPress }: Props) {
+/** memo：item/onPress 不变则跳过重渲染（网格列表滚动/翻页时减少 expo-image 解码开销）。 */
+export const PhotoThumbCell = memo(function PhotoThumbCell({ item, onPress }: Props) {
   const ref = useRef<View>(null);
 
   const handlePress = () => {
@@ -36,7 +37,7 @@ export function PhotoThumbCell({ item, onPress }: Props) {
       />
     </Pressable>
   );
-}
+});
 
 const styles = StyleSheet.create({
   cell: {

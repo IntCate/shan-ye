@@ -1,9 +1,13 @@
+"use no memo";
 /**
  * 登录面板：手机号一键登录（验证码，演示码 123456）/ 账号密码登录 可切换，
  * 底部微信 / QQ 快捷登录（本地模拟直接成功）。样式与个人面板一致（BottomSheetModal 底部弹层）。
  *
  * 本地模拟校验：手机号 11 位；验证码 / 密码均为 123456；
  * 快捷登录点击即成功。接入真实后端时替换校验与 onLogin 参数即可。
+ *
+ * 本文件使用 "use no memo"：含 sharedValue + Pan worklet，React Compiler 会干扰
+ * shared value 与 worklet 的同步（见项目记录，与 profile-sheet/bottom-sheet-modal 同因）。
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';

@@ -10,7 +10,7 @@
 
 import { Image } from 'expo-image';
 import { SymbolView } from 'expo-symbols';
-import { useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View, type View as RNView } from 'react-native';
 import { useVideoPlayer, type VideoThumbnail } from 'expo-video';
 
@@ -21,6 +21,13 @@ import type { PhotoItem, Rect } from '@/types/photo-album';
 type Props = {
   item: PhotoItem;
   onPress: (rect: Rect) => void;
+  /**
+   * iOS 18+ 真机系统限制（expo issue #31620）：AVPlayer 读取相册视频必报
+   * Code=257（full 权限也不例外），缩略图生成必然失败且刷警告；传 false 时
+   * 完全不加载视频（useVideoPlayer(null)，不创建 AVPlayerItem），显示静态
+   * 占位（播放图标 + 时长角标）。其余平台正常。
+   */
+  enabled?: boolean;
 };
 
 /** 毫秒 → M:SS 格式。 */
@@ -32,10 +39,13 @@ function formatDuration(ms: number | null): string {
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
-export function VideoThumbCell({ item, onPress }: Props) {
+/** memo：item/onPress 不变则跳过重渲染（避免网格列表滚动/翻页时重复创建 AVPlayer）。 */
+export const VideoThumbCell = memo(function VideoThumbCell({ item, onPress, enabled = true }: Props) {
   const ref = useRef<RNView>(null);
-  // 静音：网格单元只生成缩略图，不发声
-  const player = useVideoPlayer({ uri: item.uri }, (p) => {
+  // 静音：网格单元只生成缩略图，不发声。
+  // enabled=false（iOS 18+ 限制）时不传 source：不创建 AVPlayerItem，避免
+  // AVFoundation Code=257 无权限加载警告（此时缩略图本就生成不了）。
+  const player = useVideoPlayer(enabled ? { uri: item.uri } : null, (p) => {
     p.muted = true;
   });
   const [thumb, setThumb] = useState<VideoThumbnail | null>(null);
@@ -47,6 +57,7 @@ export function VideoThumbCell({ item, onPress }: Props) {
   };
 
   useEffect(() => {
+    if (!enabled) return;
     let cancelled = false;
     let generated = false;
 
@@ -72,7 +83,7 @@ export function VideoThumbCell({ item, onPress }: Props) {
       cancelled = true;
       sub.remove();
     };
-  }, [player]);
+  }, [player, enabled]);
 
   return (
     <Pressable ref={ref} onPress={handlePress} style={({ pressed }) => pressed && styles.pressed}>
@@ -103,7 +114,7 @@ export function VideoThumbCell({ item, onPress }: Props) {
       )}
     </Pressable>
   );
-}
+});
 
 const styles = StyleSheet.create({
   cell: {

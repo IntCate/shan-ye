@@ -1,10 +1,13 @@
 /**
- * 路径绘制（轨迹录制）底部面板：统计总里程 / 耗时 / 当前海拔 + 开始(↔暂停) / 继续 / 结束按钮。
+ * 路径绘制（轨迹录制）底部面板：统计总里程 / 耗时 / 当前海拔 + 三枚圆形操作按钮。
  *
  * 样式与个人面板（ProfileSheet）一致：复用 BottomSheetModal 底部弹层骨架
  * （Modal + 遮罩 + 抓手 + 下滑关闭），背景为不透明主题色、顶部圆角。
- * 状态机（由 useTrackRecorder 驱动）：idle（仅「开始」可用）→ recording（「暂停/继续」显示
- * 「暂停」）→ paused（「暂停/继续」显示「继续」）→ 结束保存轨迹为路线。
+ * 按钮布局为三按钮横排（圆形）：左=暂停↔继续、中=主按钮、右=结束。
+ * 中央主按钮：idle 时为「开始」（play），点击开始录制后变为「拍照」（camera），
+ * 拍摄由首页注入的 onCapture 实现（系统相机 → 保存相册 → 相册监听增量显示地图标记）。
+ * 状态机（由 useTrackRecorder 驱动）：idle（仅「开始」可用）→ recording（左显示「暂停」、
+ * 中显示「拍照」）→ paused（左显示「继续」）→ 结束保存轨迹为路线。
  * 关闭面板不停止录制：hook 由首页持有，定位订阅继续，重新打开面板可查看进度。
  */
 
@@ -26,8 +29,8 @@ const COLOR_GREEN = '#34C759';
 const COLOR_RED = '#FF3B30';
 const COLOR_GRAY = '#8E8E93';
 
-/** 面板内容固定高度（标题 + 统计 + 状态 + 按钮 + 抓手）。 */
-const TRACK_PANEL_HEIGHT = 236;
+/** 面板内容固定高度（标题 + 统计 + 状态 + 圆形按钮组 + 抓手）。 */
+const TRACK_PANEL_HEIGHT = 272;
 
 type TrackRecordPanelProps = {
   visible: boolean;
@@ -45,6 +48,8 @@ type TrackRecordPanelProps = {
   onResume: () => void;
   /** 结束录制并保存为路线。 */
   onStop: () => void;
+  /** 中央主按钮由「开始」变为「拍照」后的拍摄回调（录制中可用）。 */
+  onCapture: () => void;
   onClose: () => void;
 };
 
@@ -59,6 +64,7 @@ export function TrackRecordPanel({
   onPause,
   onResume,
   onStop,
+  onCapture,
   onClose,
 }: TrackRecordPanelProps) {
   const theme = useTheme();
@@ -90,7 +96,6 @@ export function TrackRecordPanel({
   const paused = status === 'paused';
   const idle = status === 'idle';
   // 「开始」仅 idle 可用（启动一次）；「暂停/继续」在 recording/paused 间来回切换
-  const startDisabled = !idle;
   // 「暂停/继续」：idle 时禁用，recording 显示「暂停」、paused 显示「继续」
   const toggleDisabled = idle;
   // 结束可用：录制中或已暂停，且至少 2 个轨迹点（1 点不成轨迹）
@@ -146,48 +151,44 @@ export function TrackRecordPanel({
           {statusText}
         </ThemedText>
 
-        {/* 按钮：开始（仅启动）/ 暂停↔继续 / 结束 */}
+        {/* 按钮组（三枚圆形，横排居中）：左=暂停↔继续，中=主按钮（开始→拍照），右=结束 */}
         <View style={styles.actions}>
-          <Pressable
-            onPress={onStart}
-            disabled={startDisabled}
-            hitSlop={4}
-            style={[styles.actionBtn, { backgroundColor: COLOR_BLUE }, startDisabled && styles.disabled]}
-            accessibilityLabel="开始">
-            <SymbolView name="play.fill" size={14} tintColor="#ffffff" />
-            <ThemedText type="smallBold" style={styles.actionText}>
-              开始
-            </ThemedText>
-          </Pressable>
           <Pressable
             onPress={recording ? onPause : onResume}
             disabled={toggleDisabled}
             hitSlop={4}
             style={[
               styles.actionBtn,
-              { backgroundColor: recording ? COLOR_GRAY : COLOR_GREEN },
+              { backgroundColor: paused ? COLOR_GREEN : COLOR_GRAY },
               toggleDisabled && styles.disabled,
             ]}
-            accessibilityLabel={recording ? '暂停' : '继续'}>
-            <SymbolView
-              name={recording ? 'pause.fill' : 'play.fill'}
-              size={14}
-              tintColor="#ffffff"
-            />
-            <ThemedText type="smallBold" style={styles.actionText}>
-              {recording ? '暂停' : '继续'}
-            </ThemedText>
+            accessibilityLabel={paused ? '继续' : '暂停'}>
+            <SymbolView name={paused ? 'play.fill' : 'pause.fill'} size={22} tintColor="#ffffff" />
           </Pressable>
+          {idle ? (
+            <Pressable
+              onPress={onStart}
+              hitSlop={4}
+              style={[styles.mainBtn, { backgroundColor: COLOR_BLUE }]}
+              accessibilityLabel="开始">
+              <SymbolView name="play.fill" size={26} tintColor="#ffffff" />
+            </Pressable>
+          ) : (
+            <Pressable
+              onPress={onCapture}
+              hitSlop={4}
+              style={[styles.mainBtn, { backgroundColor: COLOR_BLUE }]}
+              accessibilityLabel="拍照">
+              <SymbolView name="camera.fill" size={26} tintColor="#ffffff" />
+            </Pressable>
+          )}
           <Pressable
             onPress={onStop}
             disabled={!canStop}
             hitSlop={4}
             style={[styles.actionBtn, { backgroundColor: COLOR_RED }, !canStop && styles.disabled]}
             accessibilityLabel="结束">
-            <SymbolView name="stop.fill" size={14} tintColor="#ffffff" />
-            <ThemedText type="smallBold" style={styles.actionText}>
-              结束
-            </ThemedText>
+            <SymbolView name="stop.fill" size={22} tintColor="#ffffff" />
           </Pressable>
         </View>
       </View>
@@ -229,21 +230,27 @@ const styles = StyleSheet.create({
   },
   actions: {
     flexDirection: 'row',
-    gap: Spacing.two,
+    alignItems: 'center',
+    justifyContent: 'space-around',
+    marginTop: Spacing.one,
   },
+  /** 左右圆形按钮（60pt 直径）。 */
   actionBtn: {
-    flex: 1,
-    flexDirection: 'row',
+    width: 60,
+    height: 60,
+    borderRadius: 30,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: Spacing.one,
-    borderRadius: Spacing.two,
-    paddingVertical: Spacing.two,
+  },
+  /** 中央主按钮（68pt 直径，略大突出）。 */
+  mainBtn: {
+    width: 68,
+    height: 68,
+    borderRadius: 34,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   disabled: {
     opacity: 0.35,
-  },
-  actionText: {
-    color: '#ffffff',
   },
 });

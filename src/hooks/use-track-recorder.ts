@@ -2,8 +2,9 @@
  * 轨迹录制 hook：管理「开始/暂停/继续/结束」状态机与 GPS 轨迹点采集。
  *
  * - 状态机：idle（未开始）→ recording（录制中，可暂停/结束）→ paused（已暂停，可继续/结束）→ 结束保存
- * - 定位：watchPositionAsync 高频订阅（1s / 2m），每次更新记录一个轨迹点（经纬度+海拔+时间戳）
- *   并累计相邻点大圆距离作为总里程；暂停时移除订阅（省电），继续时重建
+ * - 定位：watchPositionAsync 高频订阅（1s / 2m，生命周期复用 usePositionWatch），
+ *   每次更新记录一个轨迹点（经纬度+海拔+时间戳）并累计相邻点大圆距离作为总里程；
+ *   暂停时移除订阅（省电），继续时重建
  * - 耗时：recording 期间每秒 tick 刷新（暂停期间不计，elapsedRef 累计）
  * - 当前海拔：取最近一次定位的海拔；定位暂停期间冻结为最后值
  */
@@ -11,12 +12,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import * as Location from 'expo-location';
 
+import { usePositionWatch } from '@/hooks/use-position-watch';
 import type { RoutePoint } from '@/types/route';
 import { distanceMeters } from '@/utils/geo';
 
 export type TrackStatus = 'idle' | 'recording' | 'paused';
 
-export type UseTrackRecorderResult = {
+type UseTrackRecorderResult = {
   status: TrackStatus;
   /** 已记录轨迹点（含海拔/时间戳）。 */
   points: RoutePoint[];
@@ -49,13 +51,7 @@ export function useTrackRecorder(): UseTrackRecorderResult {
   const distanceRef = useRef(0);
   const elapsedRef = useRef(0);
   const segmentStartRef = useRef(0); // 当前 recording 段的起始时间戳
-  const watchSubRef = useRef<Location.LocationSubscription | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  const stopWatch = useCallback(() => {
-    watchSubRef.current?.remove();
-    watchSubRef.current = null;
-  }, []);
 
   const stopTimer = useCallback(() => {
     if (timerRef.current) {
@@ -94,23 +90,16 @@ export function useTrackRecorder(): UseTrackRecorderResult {
     setDistanceM(distanceRef.current);
   }, []);
 
-  const startWatch = useCallback(async () => {
-    const sub = await Location.watchPositionAsync(
-      {
-        accuracy: Location.Accuracy.High,
-        timeInterval: 1000,
-        distanceInterval: 2,
-      },
-      onLocation
-    );
-    watchSubRef.current = sub;
-  }, [onLocation]);
+  // 定位生命周期（权限/快照/订阅/清理）复用公共 hook，本 hook 仅保留轨迹点采集
+  const { requestPermissionAndLocate, startWatch, stopWatch } = usePositionWatch(
+    { accuracy: Location.Accuracy.High, timeInterval: 1000, distanceInterval: 2 },
+    onLocation
+  );
 
   const start = useCallback(async (): Promise<boolean> => {
     try {
-      const perm = await Location.requestForegroundPermissionsAsync();
-      if (perm.status !== 'granted') return false;
-      const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+      const pos = await requestPermissionAndLocate();
+      if (!pos) return false;
       // 重置本轮录制状态
       pointsRef.current = [
         {
@@ -175,13 +164,12 @@ export function useTrackRecorder(): UseTrackRecorderResult {
     return recorded;
   }, [stopWatch, stopTimer]);
 
-  // 卸载清理：移除定位订阅与计时器，防泄漏
+  // 卸载清理：定位订阅由 usePositionWatch 内部自动清理；此处仅清理计时器
   useEffect(() => {
     return () => {
-      stopWatch();
       stopTimer();
     };
-  }, [stopWatch, stopTimer]);
+  }, [stopTimer]);
 
   return { status, points, distanceM, elapsedMs, altitudeM, start, pause, resume, stop };
 }

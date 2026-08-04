@@ -69,9 +69,15 @@ type Props = {
   initialIndex: number;
   sourceRect: Rect;
   onClose: () => void;
+  /**
+   * iOS 18+ 真机系统限制（expo issue #31620）：AVPlayer 读取相册视频必报
+   * Code=257（full 权限也不例外），缩略图/播放均失败。false 时视频页不创建
+   * AVPlayer，显示静态占位；其余平台正常。
+   */
+  videoEnabled?: boolean;
 };
 
-export function PhotoViewer({ items, initialIndex, sourceRect, onClose }: Props) {
+export function PhotoViewer({ items, initialIndex, sourceRect, onClose, videoEnabled = true }: Props) {
   const [currentIndex, setCurrentIndex] = useState(initialIndex);
   // false = 预览模式（图片缩小 + 画廊分区）；true = 全屏模式（图片占满，拖拽下滑关闭）
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -255,7 +261,14 @@ export function PhotoViewer({ items, initialIndex, sourceRect, onClose }: Props)
           renderItem={({ item, index }) => {
             const isCurrent = index === currentIndex;
             if (item.mediaType === MediaType.VIDEO) {
-              return <ViewerVideo item={item} active={isCurrent} height={listHeight} />;
+              return (
+                <ViewerVideo
+                  item={item}
+                  active={isCurrent}
+                  height={listHeight}
+                  enabled={videoEnabled}
+                />
+              );
             }
             if (isFullscreen) {
               // 全屏模式：仅当前页可交互（拖拽关闭 + 单击回预览），邻页静态占位
@@ -638,18 +651,31 @@ function ViewerVideo({
   item,
   active,
   height,
+  enabled,
 }: {
   item: PhotoItem;
   active: boolean;
   height: number;
+  /** iOS 18+ 真机上不创建 AVPlayer（系统限制必报 Code=257），显示静态占位。 */
+  enabled?: boolean;
 }) {
-  const player = useVideoPlayer({ uri: item.uri }, (p) => {
+  const player = useVideoPlayer(enabled ? { uri: item.uri } : null, (p) => {
     p.loop = true;
   });
   useEffect(() => {
+    if (!enabled) return;
     if (active) player.play();
     else player.pause();
-  }, [active, player]);
+  }, [active, enabled, player]);
+  if (!enabled) {
+    return (
+      <View style={[styles.page, styles.videoDisabled, { height }]}>
+        <ThemedText type="small" themeColor="textSecondary">
+          视频预览暂不可用（iOS 18+ 系统限制）
+        </ThemedText>
+      </View>
+    );
+  }
   return (
     <View style={[styles.page, { height }]}>
       <VideoView
@@ -713,6 +739,11 @@ const styles = StyleSheet.create({
     height: screenHeight,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  /** limited 权限下视频占位页：黑底 + 居中提示 */
+  videoDisabled: {
+    backgroundColor: '#000000',
+    paddingHorizontal: Spacing.four,
   },
   /** 预览模式图片外层动画容器：flex:1 填满预览区，承载拖拽 transform */
   previewImage: {
