@@ -8,7 +8,7 @@ import type { ComponentProps } from 'react';
 import { Pressable, StyleSheet, type StyleProp, type ViewStyle } from 'react-native';
 
 import { GlassPanel, liquidGlassAvailable } from '@/components/glass-panel';
-import { Spacing } from '@/constants/theme';
+import { Shadow, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 
 type SymbolName = ComponentProps<typeof SymbolView>['name'];
@@ -49,11 +49,7 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: Spacing.three,
-    shadowColor: '#000',
-    shadowOpacity: 0.2,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 4,
+    ...Shadow.md,
   },
   /** 外层：尺寸 + 圆角（shadow 在父 Pressable 的 styles.button 上，不在此层） */
   inner: {

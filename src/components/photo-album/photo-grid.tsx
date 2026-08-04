@@ -25,7 +25,6 @@ type Props = {
   items: PhotoItem[];
   loading: boolean;
   refreshing: boolean;
-  hasMore: boolean;
   /** 底部留白，避免最后内容被 Tab Bar 遮挡。 */
   bottomInset?: number;
   onItemPress: (index: number, rect: Rect) => void;
@@ -37,7 +36,6 @@ export function PhotoGrid({
   items,
   loading,
   refreshing,
-  hasMore,
   bottomInset,
   onItemPress,
   onEndReached,
@@ -69,13 +67,7 @@ export function PhotoGrid({
       }
       contentContainerStyle={{ paddingBottom: bottomInset }}
       ListFooterComponent={
-        loading ? (
-          <ActivityIndicator style={styles.footer} color={theme.text} />
-        ) : !hasMore && items.length > 0 ? (
-          <ThemedText type="small" themeColor="textSecondary" style={styles.footerText}>
-            没有更多照片
-          </ThemedText>
-        ) : null
+        loading ? <ActivityIndicator style={styles.footer} color={theme.text} /> : null
       }
       ListEmptyComponent={
         !loading && !refreshing ? (
@@ -100,10 +92,6 @@ const styles = StyleSheet.create({
     marginRight: GAP,
   },
   footer: {
-    paddingVertical: Spacing.four,
-  },
-  footerText: {
-    textAlign: 'center',
     paddingVertical: Spacing.four,
   },
   empty: {

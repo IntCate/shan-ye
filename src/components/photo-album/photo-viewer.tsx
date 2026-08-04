@@ -23,6 +23,8 @@ import {
   Pressable,
   StyleSheet,
   View,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
   type ViewToken,
 } from 'react-native';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -51,10 +53,16 @@ const DISMISS_DURATION = 180;
  *  视觉上"先快速收紧，再飞回"，比同步更利落自然。 */
 const CLIP_DURATION = 120;
 
-/** 底部画廊缩略图尺寸。 */
-const THUMBNAIL_SIZE = 48;
-/** 底部画廊缩略图间距（= marginRight，与 getItemLayout length 对齐）。 */
-const THUMBNAIL_GAP = 8;
+/** 底部画廊外层槽容器边长（固定正方形，保证每项槽宽统一、居中/snap 计算不变）。 */
+const THUMBNAIL_SIZE = 40;
+/** 非当前项竖长方形宽高比（9:16，左右被白色竖线夹住）。 */
+const THUMBNAIL_ASPECT = 9 / 16;
+/** 非当前项左右白色竖线边框宽度。 */
+const INACTIVE_BORDER_WIDTH = 1.5;
+/** 底部画廊缩略图间距（所有相邻项统一间距）。 */
+const THUMBNAIL_GAP = 6;
+/** 画廊槽宽 = 缩略图边长 + 间距；任意项滚动到 offset = index × 槽宽 时严格居中。 */
+const GALLERY_SLOT = THUMBNAIL_SIZE + THUMBNAIL_GAP;
 
 type Props = {
   items: PhotoItem[];
@@ -69,6 +77,8 @@ export function PhotoViewer({ items, initialIndex, sourceRect, onClose }: Props)
   const [isFullscreen, setIsFullscreen] = useState(false);
   // 图片区 FlatList 实际高度（预览/全屏模式不同），供每页填满
   const [listHeight, setListHeight] = useState(screenHeight);
+  // 画廊 FlatList 视口宽度（供居中计算：content 左右 padding = (视口宽 − 槽宽)/2）
+  const [galleryWidth, setGalleryWidth] = useState(screenWidth);
   const insets = useSafeAreaInsets();
 
   // 拖拽动画的共享值（全屏模式图片页共享，背景与顶栏随 bgOpacity 淡出）
@@ -82,6 +92,14 @@ export function PhotoViewer({ items, initialIndex, sourceRect, onClose }: Props)
   const previewImgY = useSharedValue(0);
   const previewImgScale = useSharedValue(1);
   const previewChromeOpacity = useSharedValue(1);
+
+  // 反馈环防护：画廊滚动触发主列表同步时设为 true，useEffect 检测到则跳过画廊回滚
+  const galleryInitiatedRef = useRef(false);
+  // 程序滚动标记：useEffect 发起的画廊瞬时跳转期间设为 true，
+  // onGalleryScroll 检测到则跳过主列表同步，避免程序跳转触发回环
+  const programmaticScrollRef = useRef(false);
+  // currentIndex 的 ref 镜像，供 onGalleryScroll 同步读取避免闭包陈旧值
+  const currentIndexRef = useRef(initialIndex);
 
   // 进入全屏模式淡入背景；退出全屏重置共享值为下次进入准备
   useEffect(() => {
@@ -98,23 +116,71 @@ export function PhotoViewer({ items, initialIndex, sourceRect, onClose }: Props)
   const pagingListRef = useRef<FlatList<PhotoItem>>(null);
   const galleryListRef = useRef<FlatList<PhotoItem>>(null);
 
-  // 当前页变化时自动滚动画廊，让当前缩略图居中
+  // 主列表翻页 → 画廊居中当前缩略图。若翻页由画廊滚动触发（galleryInitiatedRef），跳过避免回环
   useEffect(() => {
+    if (galleryInitiatedRef.current) {
+      galleryInitiatedRef.current = false;
+      return;
+    }
+    // 标记接下来的画廊 scrollToIndex 为程序滚动，onGalleryScroll 跳过同步避免回环
+    programmaticScrollRef.current = true;
     galleryListRef.current?.scrollToIndex({
       index: currentIndex,
-      viewPosition: 0.5,
-      animated: true,
+      viewPosition: 0, // content 左右 padding 已保证 offset = index × 槽宽 即居中
+      animated: false, // 瞬时跳转（对齐 iOS Photos 联动，不做动画翻页）
     });
   }, [currentIndex]);
 
-  // 点击缩略图 → 主列表翻到对应页
+  // 点击缩略图 → 立即更新当前项（白框/计数），主图瞬时翻页（animated:false 无动画冲突），
+  // 画廊居中由 useEffect 的程序滚动完成
   const handleThumbnailPress = (index: number) => {
-    pagingListRef.current?.scrollToIndex({ index, animated: true });
+    currentIndexRef.current = index;
+    setCurrentIndex(index);
+    pagingListRef.current?.scrollToIndex({ index, animated: false });
   };
 
+  // 主列表翻页回调：更新 currentIndex（含 ref 镜像），触发上面的 useEffect 居中画廊。
+  // 画廊发起的同步（galleryInitiatedRef）时跳过，避免主列表翻页中间状态的 viewableItems 回报
+  // 触发额外的 setCurrentIndex → 画廊抖动
   const onViewableItemsChanged = ({ viewableItems }: { viewableItems: ViewToken[] }) => {
-    if (viewableItems[0]?.index != null) setCurrentIndex(viewableItems[0].index);
+    if (viewableItems[0]?.index != null) {
+      // 画廊发起的同步已由 onGalleryScroll 更新 currentIndex，跳过避免回环
+      if (galleryInitiatedRef.current) return;
+      currentIndexRef.current = viewableItems[0].index;
+      setCurrentIndex(viewableItems[0].index);
+    }
   };
+
+  // 用户开始拖动画廊 → 重置程序滚动标记，让 onGalleryScroll 恢复跨槽同步主图 + index 检测
+  const onGalleryScrollBeginDrag = () => {
+    programmaticScrollRef.current = false;
+  };
+
+  // 画廊滚动：跨槽即瞬时切主图页（iOS Photos 式 scrollToItem(animated:false)）。
+  // JS 侧同步更新 currentIndex（计数/白框高亮）；程序滚动期间（useEffect 发起）跳过，避免反馈环。
+  // 关键：全程不做 animated:true 的跨列表程序滚动——程序动画会反复打断 UIScrollView 本机滚动，
+  // 触发全屏大图虚拟化渲染 + 加载风暴占满主线程，是此前快速滑动卡死的根因
+  const onGalleryScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    if (programmaticScrollRef.current) return; // 程序滚动，跳过同步
+    if (galleryWidth === 0) return;
+
+    const contentX = e.nativeEvent.contentOffset.x;
+    // 居中索引：content 左右 padding = (视口宽 − 槽宽)/2，任意项居中时 offset 恰为 index × 槽宽
+    const centeredIndex = Math.round(contentX / GALLERY_SLOT);
+
+    if (
+      centeredIndex >= 0 &&
+      centeredIndex < items.length &&
+      centeredIndex !== currentIndexRef.current
+    ) {
+      currentIndexRef.current = centeredIndex;
+      galleryInitiatedRef.current = true;
+      setCurrentIndex(centeredIndex);
+      // 瞬时跳页：无动画、无中间页渲染，主图直接切到目标页（惯性经过多个槽时逐槽瞬切）
+      pagingListRef.current?.scrollToIndex({ index: centeredIndex, animated: false });
+    }
+  };
+
   const viewabilityConfig = { itemVisiblePercentThreshold: 50 };
 
   const bgStyle = useAnimatedStyle(() => ({ opacity: bgOpacity.value }));
@@ -144,14 +210,14 @@ export function PhotoViewer({ items, initialIndex, sourceRect, onClose }: Props)
     <Modal visible animationType="none" presentationStyle="overFullScreen" transparent onRequestClose={onClose}>
       {/* Modal 内容是独立原生窗口，需自带 GestureHandlerRootView */}
       <GestureHandlerRootView style={styles.root}>
-        {/* 背景：预览模式白色（拖拽时随 chrome 淡出）；全屏模式黑色动画控制 */}
+        {/* 背景：预览模式白色（拖拽时随 chrome 淡出）；全屏模式黑色动画控制。
+            必须拦截触摸（默认 auto，勿设 none/box-none）：查看器是 overFullScreen 透明 Modal，
+            与下层个人面板 Modal 层叠，背景不拦截的区域 hitTest 失败会把触摸穿透到下层，
+            触发个人面板的「下滑关闭」Pan，导致下滑照片时连带关闭个人面板 */}
         {isFullscreen ? (
-          <Animated.View style={[styles.background, bgStyle]} pointerEvents="none" />
+          <Animated.View style={[styles.background, bgStyle]} />
         ) : (
-          <Animated.View
-            style={[styles.background, styles.backgroundPreview, previewChromeStyle]}
-            pointerEvents="none"
-          />
+          <Animated.View style={[styles.background, styles.backgroundPreview, previewChromeStyle]} />
         )}
 
         {/* 预览模式顶栏（正常流式布局，占空间，图片区在下方；拖拽时随 chrome 淡出） */}
@@ -170,6 +236,8 @@ export function PhotoViewer({ items, initialIndex, sourceRect, onClose }: Props)
           keyExtractor={(item) => item.id}
           horizontal
           pagingEnabled
+          // 隐藏横向滚动条（否则翻页时出现在主图下方/缩略图上方）
+          showsHorizontalScrollIndicator={false}
           initialScrollIndex={initialIndex}
           getItemLayout={(_, index) => ({
             length: screenWidth,
@@ -231,7 +299,9 @@ export function PhotoViewer({ items, initialIndex, sourceRect, onClose }: Props)
           </Animated.View>
         )}
 
-        {/* 底部画廊（仅预览模式，正常流式布局占空间；拖拽时随 chrome 淡出） */}
+        {/* 底部画廊（仅预览模式，正常流式布局占空间；拖拽时随 chrome 淡出）
+            当前项无框正方形、非当前项 9:16 竖长方形左右白线夹住（无放大/让位效果）；
+            content 左右 padding = (视口宽 − 槽宽)/2 使当前项始终居中，首尾留白随滑动推入 */}
         {!isFullscreen && items.length > 1 && (
           <Animated.View
             style={[styles.gallery, { paddingBottom: insets.bottom + Spacing.two }, previewChromeStyle]}>
@@ -241,50 +311,91 @@ export function PhotoViewer({ items, initialIndex, sourceRect, onClose }: Props)
               keyExtractor={(item) => item.id}
               horizontal
               showsHorizontalScrollIndicator={false}
+              initialScrollIndex={initialIndex}
               getItemLayout={(_, index) => ({
-                length: THUMBNAIL_SIZE + THUMBNAIL_GAP,
-                offset: (THUMBNAIL_SIZE + THUMBNAIL_GAP) * index,
+                length: GALLERY_SLOT,
+                offset: GALLERY_SLOT * index,
                 index,
               })}
               onScrollToIndexFailed={({ index }) => {
                 galleryListRef.current?.scrollToOffset({
-                  offset: (THUMBNAIL_SIZE + THUMBNAIL_GAP) * index,
-                  animated: true,
+                  offset: GALLERY_SLOT * index,
+                  animated: false,
                 });
               }}
-              contentContainerStyle={styles.galleryContent}
-              renderItem={({ item, index }) => {
-                const isCurrent = index === currentIndex;
-                return (
-                  <Pressable
-                    onPress={() => handleThumbnailPress(index)}
-                    style={styles.thumbnailPressable}>
-                    <View style={[styles.thumbnail, isCurrent && styles.thumbnailActive]}>
-                      {item.mediaType === MediaType.VIDEO ? (
-                        <View style={styles.thumbnailVideo}>
-                          <SymbolView
-                            name={{ ios: 'play.fill', android: 'play_arrow', web: 'play_arrow' }}
-                            size={16}
-                            tintColor="#ffffff"
-                          />
-                        </View>
-                      ) : (
-                        <Image
-                          source={item.uri}
-                          style={styles.thumbnailImage}
-                          contentFit="cover"
-                          cachePolicy="memory-disk"
-                        />
-                      )}
-                    </View>
-                  </Pressable>
-                );
-              }}
+              onScroll={onGalleryScroll}
+              onScrollBeginDrag={onGalleryScrollBeginDrag}
+              onLayout={(e) => setGalleryWidth(e.nativeEvent.layout.width)}
+              scrollEventThrottle={16}
+              snapToInterval={GALLERY_SLOT}
+              snapToAlignment="start"
+              // 惯性结束由 snapToInterval 原生吸附回最近整槽（当前项始终居中），
+              // 无需 disableIntervalMomentum + onMomentumScrollEnd 手动吸附兜底
+              decelerationRate="fast"
+              contentContainerStyle={[
+                styles.galleryContent,
+                // 左右留白 = (视口宽 − 槽宽)/2：首项居中、尾项居中，边缘留空随滑动推入
+                { paddingHorizontal: (galleryWidth - GALLERY_SLOT) / 2 },
+              ]}
+              renderItem={({ item, index }) => (
+                <GalleryThumbnail
+                  item={item}
+                  isCurrent={index === currentIndex}
+                  onPress={() => handleThumbnailPress(index)}
+                />
+              )}
             />
           </Animated.View>
         )}
       </GestureHandlerRootView>
     </Modal>
+  );
+}
+
+/**
+ * 画廊缩略图（纯静态）。
+ *
+ * 外层槽容器固定 THUMBNAIL_SIZE 正方形（每项槽宽统一，居中/snap 计算不变）；
+ * 当前项：无框正方形；非当前项：9:16 竖长方形，左右两侧白色竖线夹住。
+ * 滚动完全由 FlatList 原生驱动。
+ */
+function GalleryThumbnail({
+  item,
+  isCurrent,
+  onPress,
+}: {
+  item: PhotoItem;
+  isCurrent: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable onPress={onPress} style={styles.thumbnailOuter}>
+      <View style={styles.thumbnailSlot}>
+        <View
+          style={[
+            styles.thumbnail,
+            // 当前项：无框正方形；非当前项：竖长方形 + 左右白线
+            isCurrent ? { width: THUMBNAIL_SIZE, height: THUMBNAIL_SIZE } : styles.thumbnailInactive,
+          ]}>
+          {item.mediaType === MediaType.VIDEO ? (
+            <View style={styles.thumbnailVideo}>
+              <SymbolView
+                name={{ ios: 'play.fill', android: 'play_arrow', web: 'play_arrow' }}
+                size={12}
+                tintColor="#ffffff"
+              />
+            </View>
+          ) : (
+            <Image
+              source={item.uri}
+              style={styles.thumbnailImage}
+              contentFit="cover"
+              cachePolicy="memory-disk"
+            />
+          )}
+        </View>
+      </View>
+    </Pressable>
   );
 }
 
@@ -627,34 +738,42 @@ const styles = StyleSheet.create({
   },
   /** 预览模式底部画廊：正常流式布局（占空间，与图片区分开不重叠） */
   gallery: {
-    paddingTop: Spacing.two,
+    paddingTop: Spacing.three,
   },
+  /** 水平 padding 由 (视口宽 − 槽宽)/2 内联传入（保证当前项严格居中）；paddingVertical 留出空间 */
   galleryContent: {
-    paddingHorizontal: Spacing.two,
     alignItems: 'center',
+    paddingVertical: 6,
   },
-  thumbnailPressable: {
+  /** 缩略图外层：marginRight 保持相邻项间距 */
+  thumbnailOuter: {
     marginRight: THUMBNAIL_GAP,
   },
-  thumbnail: {
+  /** 槽容器：固定 THUMBNAIL_SIZE 正方形（槽宽统一），非当前项竖长方形在其中水平居中 */
+  thumbnailSlot: {
     width: THUMBNAIL_SIZE,
     height: THUMBNAIL_SIZE,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  /** 缩略图本体：圆角 + 裁边 */
+  thumbnail: {
     borderRadius: Spacing.one,
     overflow: 'hidden',
-    opacity: 0.5,
   },
-  thumbnailActive: {
-    opacity: 1,
-    borderWidth: 2,
+  /** 非当前项：9:16 竖长方形，左右两侧白色竖线夹住（上下无框）；当前项不套此样式 */
+  thumbnailInactive: {
+    width: Math.round(THUMBNAIL_SIZE * THUMBNAIL_ASPECT),
+    height: THUMBNAIL_SIZE,
+    borderLeftWidth: INACTIVE_BORDER_WIDTH,
+    borderRightWidth: INACTIVE_BORDER_WIDTH,
     borderColor: '#ffffff',
   },
   thumbnailImage: {
-    width: THUMBNAIL_SIZE,
-    height: THUMBNAIL_SIZE,
+    flex: 1,
   },
   thumbnailVideo: {
-    width: THUMBNAIL_SIZE,
-    height: THUMBNAIL_SIZE,
+    flex: 1,
     backgroundColor: 'rgba(255, 255, 255, 0.15)',
     alignItems: 'center',
     justifyContent: 'center',

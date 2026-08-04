@@ -42,8 +42,6 @@ Omni/
 ├── tsconfig.json            # 路径别名 @/* → ./src/*，@/assets/* → ./assets/*
 ├── AGENTS.md                # 工程约束：写代码前必读 Expo v57 文档
 ├── assets/                  # 静态资源（图标、splash、tab 图标）
-├── scripts/
-│   └── reset-project.js     # 重置为空白脚手架
 └── src/
     ├── app/                 # Expo Router 文件路由（约定：src/app 目录）
     │   ├── _layout.tsx      # 根布局：GestureHandlerRootView + ThemeProvider + AnimatedSplashOverlay + AppTabs
@@ -70,9 +68,7 @@ Omni/
     │   ├── themed-text.tsx                   # 主题化文本
     │   ├── themed-view.tsx                   # 主题化容器
     │   ├── hint-row.tsx                      # 提示行
-    │   ├── web-badge.tsx                     # Web 端版本徽标
     │   ├── external-link.tsx                 # 应用内浏览器外链
-    │   └── ui/collapsible.tsx                # 可折叠面板
     ├── hooks/
     │   ├── use-location.ts                   # 定位请求与首帧对齐缓存
     │   ├── use-heading.ts                    # 磁力计真北朝向
@@ -152,7 +148,6 @@ npm start          # 即 expo start
 | `npm run android` | 构建并运行 Android 开发版本（`expo run:android`） |
 | `npm run web` | 启动 Web 开发服务器（`expo start --web`） |
 | `npm run lint` | 运行 ESLint（`expo lint`） |
-| `npm run reset-project` | 将现有代码移至 `example/` 并生成空白 `src/app` 脚手架 |
 
 ## 核心架构
 

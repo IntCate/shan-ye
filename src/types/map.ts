@@ -6,7 +6,7 @@
  * 而不会把 react-native-maps 拉入 Web 打包。
  */
 
-import type { GeoTaggedPhoto } from './geotagged-photo';
+import type { GeoTaggedPhoto, PhotoCluster } from './geotagged-photo';
 import type { Route } from './route';
 
 /** 与 react-native-maps 的 MapType 一致，并扩展自定义类型 'weather'（天气地图，业务侧自定义渲染）。
@@ -68,14 +68,10 @@ export type SatelliteMapProps = {
   photoMarkers?: GeoTaggedPhoto[];
   /** 导入的路径文件，按 visible 过滤后渲染为 Polyline。 */
   routes?: Route[];
-  /**
-   * 设备磁力计真北朝向（0-360，0=正北，90=正东）；null = 不可用。
-   * 由 use-heading hook 提供；非 null 时在系统定位蓝点上叠加半透明锥形指示器（heading cone），
-   * 形如 iOS Maps 的方向光束。Web 端恒为 null（use-heading 在 Web 返回 available=false）。
-   */
-  heading?: number | null;
   /** 点击照片 Marker 回调，业务侧据此弹出详情面板。 */
   onPhotoPress?: (photo: GeoTaggedPhoto) => void;
+  /** 点击照片簇 Marker 回调（视口内照片密集时聚合为簇），业务侧据此放大展开簇。 */
+  onClusterPress?: (cluster: PhotoCluster) => void;
   showsUserLocation?: boolean;
   onRegionChangeComplete?: (region: MapRegion) => void;
   /** 地图区域变化回调（拖拽/缩放过程中持续触发），用于即时清除依赖像素坐标的浮动卡片。 */

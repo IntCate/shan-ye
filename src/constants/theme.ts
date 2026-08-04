@@ -61,7 +61,6 @@ export const Spacing = {
   six: 64,
 } as const;
 
-export const BottomTabInset = Platform.select({ ios: 50, android: 80 }) ?? 0;
 export const MaxContentWidth = 800;
 
 /**
@@ -73,4 +72,35 @@ export const Glass = {
   intensity: 50,
   overlayLight: 'rgba(249, 249, 249, 0.5)',
   overlayDark: 'rgba(25, 25, 25, 0.5)',
+} as const;
+
+/**
+ * 浮层阴影统一 token：首页地图各浮层（按钮 / 面板 / Marker）共用。
+ * iOS 用 shadow* 系列，Android 用 elevation；三档对应不同体量元素。
+ */
+export const Shadow = {
+  /** 小元素：照片 Marker 缩略图等。 */
+  sm: {
+    shadowColor: '#000',
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+    shadowOffset: { width: 0, height: 1 },
+    elevation: 3,
+  },
+  /** 中体量：悬浮按钮 / 信息卡片。 */
+  md: {
+    shadowColor: '#000',
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 4,
+  },
+  /** 面板浮层：搜索栏 / 结果卡 / 图层菜单。 */
+  lg: {
+    shadowColor: '#000',
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 6,
+  },
 } as const;

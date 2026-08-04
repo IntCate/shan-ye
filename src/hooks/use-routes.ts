@@ -1,8 +1,9 @@
 /**
  * 路径文件数据层 hook（native）。
  *
- * 通过 expo-document-picker 选择 KML/GPX 文件，用 expo-file-system 读取内容，
+ * 通过 expo-document-picker 选择 KML/GPX/KMZ 文件，用 expo-file-system 读取内容，
  * 再经 route-parser 解析为 Route[]，供卫星地图以 Polyline 形式展示。
+ * KMZ 是 ZIP 压缩的 KML，读取为二进制（arrayBuffer）后由 route-parser 内部解压。
  *
  * 设计要点：
  * - 会话级保留：routes 仅存于内存，退出 App 清空（MVP，不引入持久化存储）。
@@ -18,22 +19,25 @@
  * API（Expo SDK 57）：
  * - DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true }) → { canceled, assets }
  * - new File(uri).textSync()（expo-file-system 现代 File API，与 DocumentPicker 配套）
+ * - new File(uri).arrayBuffer()（KMZ 二进制读取，返回 ArrayBuffer → Uint8Array）
  */
 
 import { useCallback, useRef, useState } from 'react';
 import * as DocumentPicker from 'expo-document-picker';
 import { File } from 'expo-file-system';
 
-import { parseRouteFile } from '@/utils/route-parser';
+import { parseRouteFile, ROUTE_COLORS } from '@/utils/route-parser';
 import { gcj02ToWgs84, wgs84ToGcj02, withConvertedCoords } from '@/utils/coord-transform';
-import type { CoordMode, Route } from '@/types/route';
+import type { CoordMode, Route, RoutePoint } from '@/types/route';
 
 export type UseRoutesResult = {
   routes: Route[];
   loading: boolean;
   error: string | null;
-  /** 打开系统文档选择器，选择并解析 KML/GPX 文件。返回本次导入的路线（取消/失败返回 null）。 */
+  /** 打开系统文档选择器，选择并解析 KML/GPX/KMZ 文件。返回本次导入的路线（取消/失败返回 null）。 */
   importRoute: () => Promise<Route[] | null>;
+  /** 把应用内绘制的轨迹点保存为一条路线（format: 'record'），并入路径列表。 */
+  addRecordedRoute: (points: RoutePoint[]) => void;
   /** 切换某条路线的显隐。 */
   toggleRoute: (id: string) => void;
   /** 循环切换坐标模式：raw → toWgs84 → toGcj02 → raw，用于修正坐标系不匹配偏移。 */
@@ -82,7 +86,13 @@ export function useRoutes(): UseRoutesResult {
       // 单文件导入（暂不支持 multiple，避免一次性大量解析阻塞）
       const asset = result.assets[0];
       const file = new File(asset.uri);
-      const content = file.textSync();
+      // KMZ 是 ZIP 二进制文件，需读取为 ArrayBuffer 再转 Uint8Array 供解压器使用；
+      // KML/GPX 是 UTF-8 文本，用 textSync 同步读取。
+      const ext = asset.name.toLowerCase().split('.').pop() ?? '';
+      const content: string | Uint8Array =
+        ext === 'kmz'
+          ? new Uint8Array(await file.arrayBuffer())
+          : file.textSync();
 
       // 用 routesRef 同步读取当前数量供颜色分配，解析后立即提交
       const imported = parseRouteFile(asset.name, content, routesRef.current.length);
@@ -131,7 +141,37 @@ export function useRoutes(): UseRoutesResult {
     commit(routesRef.current.filter((r) => r.id !== id));
   }, [commit]);
 
+  /** 绘制轨迹保存为路线：单段、坐标模式 raw、颜色按已有数量循环分配。 */
+  const addRecordedRoute = useCallback(
+    (points: RoutePoint[]) => {
+      const idx = routesRef.current.length;
+      const route: Route = {
+        id: `record-${Date.now()}`,
+        name: `绘制轨迹 ${idx + 1}`,
+        format: 'record',
+        segments: [{ points }],
+        originalSegments: [{ points }],
+        visible: true,
+        color: ROUTE_COLORS[idx % ROUTE_COLORS.length],
+        coordMode: 'raw',
+        importedAt: Date.now(),
+      };
+      commit([...routesRef.current, route]);
+    },
+    [commit]
+  );
+
   const clearError = useCallback(() => setError(null), []);
 
-  return { routes, loading, error, importRoute, toggleRoute, cycleCoordMode, removeRoute, clearError };
+  return {
+    routes,
+    loading,
+    error,
+    importRoute,
+    addRecordedRoute,
+    toggleRoute,
+    cycleCoordMode,
+    removeRoute,
+    clearError,
+  };
 }

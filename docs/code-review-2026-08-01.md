@@ -1,7 +1,7 @@
 # Omni `src/` 代码审查报告
 
 - **审查日期**：2026-08-01
-- **最后修订**：2026-08-02（修复 #1 #2 #3 #4 #7，核实 #5 #6 审查前已修复）
+- **最后修订**：2026-08-04（追加 ProfileSheet 收起态错配修复审查记录）
 - **审查范围**：`src/` 目录全部 22 个文件（app / components / hooks / services / constants / types）
 - **审查基线**：Expo SDK 57.0.9 · React 19.2.3 · RN 0.86.2 · react-native-maps 1.27.2 · TypeScript strict
 - **审查方式**：静态阅读 + `rg` 交叉验证（死代码、指令缺失、未使用参数）
@@ -201,6 +201,95 @@ return () => {
 截至 2026-08-02，阶段 1（自动可修）、阶段 2（产品决策项）、阶段 4（健壮性增强）全部完成；仅剩阶段 3（Android Maps API key + bundleId）依赖外部资源待办。`src/` 已达「无死代码、无已知风险回归、无模板残留」的基线状态。
 
 ## 五、修复日志
+
+### 2026-08-04：收起态上滑失效修复（profile-sheet.tsx，优化 #11 回归）
+
+**现象**：展开态下拉回收后再次上滑无反应（面板纹丝不动），首次上滑展开正常。详见 [optimization-2026-08-03.md](./optimization-2026-08-03.md) #13。
+
+**根因**：#11 引入动态 `activeOffsetY`（依赖 `expanded`）后，React Compiler 自动 memo 缓存 `pan` 手势对象，`activeOffsetY` 停留在展开态 `[-Infinity, 10]`（仅向下激活），收起态上滑在原生层不激活。已核实 `-Infinity` 在 iOS（`shouldFailUnderCustomCriteria` 的 `isnan` 判断）、Android、web（`shouldActivate` 比较）三端语义均正确，排除配置值问题。
+
+**修复**（[profile-sheet.tsx](../src/components/profile-sheet.tsx) + [bottom-sheet-modal.tsx](../src/components/ui/bottom-sheet-modal.tsx)）：两文件首行添加 `"use no memo"`；展开态 `activeOffsetY` 的 `-Infinity` 改为 `-100000`（避免 JS→原生序列化异常）。
+
+**审查结论**：根因定位基于「#11 前固定双向 slop 无缓存问题、#11 后依赖 state 的配置缓存失效」的对照；`npx tsc --noEmit` 通过。**注意**：`"use no memo"` 为 babel 编译期指令，需清缓存重启 Metro（`npx expo start --clear`）后测试，否则热更新沿用旧编译产物、修改看似无效。需真机回归：展开态→下拉回收→再上滑应正常展开；展开态上滑列表滚动仍流畅、下滑回收正常。
+
+### 2026-08-04：展开态下拉回收人性化（profile-sheet.tsx）
+
+**现象**：展开态下拉回收仅需 80px（阈值与 480~640px 面板不匹配），且 500px/s 轻甩即触发——「只能滑动一点就回收」，连续下拉容易直接关闭。详见 [optimization-2026-08-03.md](./optimization-2026-08-03.md) #12。
+
+**根因**：展开态 `onEnd` 复用收起态的 `DISMISS_THRESHOLD(80) / DISMISS_VELOCITY(500)`，阈值未随行程（130~210px）调整。
+
+**修复**（[profile-sheet.tsx](../src/components/profile-sheet.tsx)）：
+- 展开态回收判定改为**行程中点** `(cardHeight - COLLAPSED_HEIGHT) / 2`（map≈130px / 列表≈210px，自适应）
+- 新增 `COLLAPSING_VELOCITY = 800` 放宽展开态下甩速度阈值（收起态关闭仍 500）
+- 展开态松手仅决定「弹回 / 回收」，绝不直接关闭；关闭仅在收起态（80px + 500）保留
+
+**审查结论**：阈值与行程解耦，展开态下拉手感从容，单次下拉最多落到收起态；`npx tsc --noEmit` 通过。需真机回归：展开态下拉 50% 行程内弹回、超中点回收、快速下甩回收、收起态下拉关闭行为不变。
+
+### 2026-08-04：个人信息面板展开态去除上滑交互（profile-sheet.tsx）
+
+**现象**：展开态「显示有上滑交互」——上滑手势激活外层 Pan，干扰照片/路径列表内部 ScrollView/FlatList 滚动。详见 [optimization-2026-08-03.md](./optimization-2026-08-03.md) #11。
+
+**根因**：pan 手势无 `activeOffsetY`，slop 双向激活；展开态上滑虽被 `Math.max` 钳制（卡片不动），但手势仍激活并与内部列表滚动竞争。
+
+**修复**（[profile-sheet.tsx](../src/components/profile-sheet.tsx)）：
+- 新增 `expanded` state（与 `expandedRef` 双轨：ref 供 worklet，state 驱动手势重建）
+- pan 手势按状态动态配置 `activeOffsetY`：展开态 `[Number.NEGATIVE_INFINITY, 10]`（仅向下激活，上滑交内部列表滚动）、收起态 `[-10, 10]`（双向不变）
+
+**审查结论**：行为收敛到 iOS 底部 sheet 标准——展开态上滑滚动内容、下滑拖拽回收；`npx tsc --noEmit` 通过。需真机回归：照片/路径展开态上滑列表滚动流畅、列表到顶后继续下拉回收、收起态上滑展开/下滑关闭不变。
+
+### 2026-08-04：个人信息面板收起态错配修复（profile-sheet.tsx）
+
+**现象**：点击侧边「我的」按钮打开面板时，收起态偶发张开不完全——只显示顶部一小部分内容（如只到头像附近），而非完整收起态（头像 + 昵称 + 统计，220px）。详见 [optimization-2026-08-03.md](./optimization-2026-08-03.md) #10。
+
+**根因**：`collapse()`、`pan.onUpdate()` 收起态分支、`pan.onEnd()` 收起态弹回三处用**缓存值** `collapsedOffset` 作收起态基准；该值仅在 `expand()` 时被立即更新为 `targetHeight - COLLAPSED_HEIGHT`，与 `cardHeight` 的 300ms `withTiming` 动画不同步。时序错配（展开动画中途回收、状态残留）时，可见高度 = `cardHeight - translateY` ≠ `COLLAPSED_HEIGHT`。
+
+**修复**（[profile-sheet.tsx](../src/components/profile-sheet.tsx)）：
+- 收起态基准一律**实时计算** `cardHeight.value - COLLAPSED_HEIGHT`（pan.onUpdate / pan.onEnd 弹回）
+- `collapse()` 新增 `targetHeightRef`：`cardHeight` 收尾到展开目标 + `translateY` 停靠到 `target - COLLAPSED_HEIGHT`，两者同速动画，任何时序下可见高度恒 = 220，且不改变展开高度语义
+- `collapsedOffset` 降级为仅 `open()` 停靠位使用（opening effect 仍与 `cardHeight` 同步重置）
+
+**审查结论**：修复消除缓存基准与动画值的耦合，属防御性根修；`npx tsc --noEmit` 通过。需真机回归：反复开合面板、照片/路径展开后下拉回收再上滑、快速连点等时序下，收起态高度应恒为 220px。
+
+### 2026-08-03：照片标记 JS 聚类 + 视口裁剪（阶段 2，专项 #9）
+
+专项 #8（ph:// 缩略图 + tracksViewChanges）真机验证通过后，落地 JS 聚类与视口裁剪，详见 [optimization-2026-08-03.md](./optimization-2026-08-03.md) #9：
+
+- **新建 `src/utils/cluster.ts`**：`clusterPhotos` 像素空间网格聚类（半径 80px，O(n)，数百张毫秒级）——同格照片聚为簇（坐标取平均、count 徽标）、单张保留；视口外（含 0.5 缓冲）照片丢弃，实现视口裁剪。无需原生聚合库（照片 >500 时再评估）。
+- **`satellite-map.tsx`**：内部 `viewport` state + `handleRegionChangeComplete`（更新视口并透传）；`clustered = useMemo(clusterPhotos(...))` 仅手势结束重算；`PhotoMarkers` 支持混合项——单张（原缩略图 + 加载期追踪）与簇（36px 圆形徽标 `rgba(0,122,255,0.92)`、`tracksViewChanges={false}`、锚定中心）。
+- **`index.tsx`**：`handlePhotoClusterPress` 计算簇内包围盒（20% 边距、0.005 兜底）→ `moveMap` 放大展开；`SatelliteMapProps` 新增 `onClusterPress`。
+- **`use-geotagged-photos.ts`**：`MAX_PHOTOS` 100 → 300（聚类 + 视口裁剪使渲染规模受控）。
+- **核查**：`AssetField` 不支持 location 过滤 → 视口裁剪只能在物化后 JS 侧完成，原生查询级视口查询留待阶段 3（SQLite 建区域索引）。
+
+**审查结论**：聚类为新增交互（簇 → 点击展开），需真机验证簇徽标显示、点击放大展开、拖拽重聚类；`npx tsc --noEmit` 通过。
+
+### 2026-08-03：照片与 EXIF 提取性能专项（照片管线 + Marker 渲染）
+
+应需求「先优化照片与 EXIF 提取问题」做性能专项。先核实原生层事实（expo-media-library 57 / expo-image 57 / react-native-maps 1.27 源码），再落地纯 JS 改动，详见 [optimization-2026-08-03.md](./optimization-2026-08-03.md) #8：
+
+- **数据管线瘦身**：`Asset.getUri()` 在 iOS 触发 iCloud 下载 + 原图文件复制（`isNetworkAccessAllowed=true`），是最大瓶颈；而 `getLocation()` 直接读 `phAsset.location` 元数据（不解码、不下载）。物化改为只读 `{id, creationTime, location}`，去掉 `getUri`。
+- **渲染改 ph:// 缩略图**：expo-image 原生支持 `ph://`（PhotoLibraryAssetLoader），按容器尺寸请求系统缩略图，Marker 缩略图与详情大图均改 `source={{ uri: photo.id }}`，无需提前拿原图 uri。
+- **Android Marker 视图追踪**：react-native-maps 1.27 `tracksViewChanges` 默认 true 会持续追踪自定义视图（性能杀手，iOS Apple Maps 忽略）。PhotoMarkers 加 `tracksViewChanges={!loaded}`，图片 onLoad/onError 后置 false 做最终快照停止追踪。
+- **桥接并发控制**：`materializeAssets` 默认分批 10/批，替代原 60 并发 `Promise.all`。
+- **增量刷新**：新增 `addListener('mediaLibraryDidChange')`，拍照/删除后自动重扫 GPS 照片（卸载 remove 防泄漏）。
+- **核查**：`AssetField` 不支持 location 过滤 → 原生查询层无法视口裁剪，仅能物化后 JS 过滤（列入后续可选）。
+
+**审查结论**：专项 #8 的「ph:// 缩略图」为行为变更点，需真机验证 iOS/Android 图片显示与详情大图；`npx tsc --noEmit` 通过。
+
+### 2026-08-03：全仓第二轮优化审查（性能重构 + 公共组件抽取 + 数据层合并）
+
+对 2026-08-01 审查后新增的迭代代码做第二轮审查，重点核查两项：**冗余代码**（重复逻辑、无用文件、未用导入/常量）与**代码分散**（功能迁移记录导致的重复实现）。发现并处理以下问题，详见 [optimization-2026-08-03.md](./optimization-2026-08-03.md)：
+
+- **冗余清理**：删除 5 个模板遗留死文件（`web-badge.tsx` / `ui/collapsible.tsx` / `animated-icon.module.css` / `logo-glow.png` / `scripts/reset-project.js`）+ 2 个空目录；重写 `animated-icon.tsx`（148→74 行）与 `animated-icon.web.tsx`（108→3 行）去掉死导出；清理 index.tsx 空占位按钮、map-search-bar 未用 import、README 失效引用。
+- **公共组件抽取**：两个底部弹层（照片详情 / 我的面板）逐字重复的 Modal + backdrop + grabber + Pan 手势结构抽为 `use-bottom-sheet.ts` + `ui/bottom-sheet-modal.tsx`，消除约百行重复。
+- **性能重构**（审查重点：React Compiler + 0 memo + 10Hz 磁力计组合导致整树重渲染）：
+  - H1：`useHeading` 从 index.tsx 下移进 `satellite-map.tsx` 内部持有，heading/accuracy 更新不再驱动首页整树；`use-heading` 增加值相等短路。
+  - H2：地图拆出 `SearchMarkers` / `PhotoMarkers` / `RoutePolylines` 三个 React.memo 子组件，anchor/centerOffset 提为模块常量，回调 useCallback 化；`"use no memo"` 指令保留。
+  - H3：`useLocation` 移除无人消费的 coords/status/error state 与 `watchPositionAsync` 订阅，改为纯命令式 `requestAndLocate`（地图蓝点由系统 `showsUserLocation` 驱动）。
+- **数据层合并**：相册三管线（网格 / 地图标记 / 总数）统一到 `constants/media.ts`（`MEDIA_PAGE_SIZE`）、`services/media-library.ts`（`materializeAssets`）、`hooks/use-media-library-permission.ts`（四态权限判定），消除 3 处重复 `Promise.allSettled` 样板与权限判定。
+- **样式与工具**：6 处散落 shadow 块 token 化为 `theme.ts` 的 `Shadow.sm/md/lg`；坐标展示统一为 `utils/geo.ts` 的 `formatLatLng`。
+- **核查无改动**：取色入口（`ROUTE_COLORS`）确认已在 `route-parser.ts` 集中，无分散。
+
+**审查结论**：截至 2026-08-03，`src/` 无死代码、无重复实现、无已知性能热点；`npx tsc --noEmit` 通过。新增代码（useBottomSheet / materializeAssets / useMediaLibraryPermission）延续了「集中管理、单点修改」约定，未引入新的模板残留或指令缺失。
 
 ### 2026-08-02：阶段 1 收官 + 健壮性增强 + 核实 #5 #6 已修复（对应 #1 #2 #3 #4 #5 #6 #7）
 

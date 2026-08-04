@@ -35,8 +35,8 @@ export type Route = {
   id: string;
   /** 显示名称：KML <name> / GPX <name> / 文件名（去扩展名）回退。 */
   name: string;
-  /** 源文件格式。 */
-  format: 'kml' | 'gpx';
+  /** 源文件格式；record 表示应用内绘制的轨迹（无源文件）。 */
+  format: 'kml' | 'gpx' | 'kmz' | 'record';
   /** 当前用于地图渲染的路径段（可能经坐标转换）。 */
   segments: RouteSegment[];
   /** 导入时的原始路径段，永不变，用于切换坐标模式时重新转换避免精度损失。 */

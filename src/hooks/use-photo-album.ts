@@ -14,10 +14,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { AssetField, MediaType, Query } from 'expo-media-library';
 
+import { MEDIA_PAGE_SIZE } from '@/constants/media';
+import { materializeAssets } from '@/services/media-library';
 import type { PhotoItem } from '@/types/photo-album';
-
-/** 每页数量：3 列 × 20 行。 */
-const PAGE_SIZE = 60;
 
 export function usePhotoAlbum() {
   const [items, setItems] = useState<PhotoItem[]>([]);
@@ -43,46 +42,35 @@ export function usePhotoAlbum() {
       const assets = await new Query()
         .within(AssetField.MEDIA_TYPE, [MediaType.IMAGE, MediaType.VIDEO])
         .orderBy({ key: AssetField.CREATION_TIME, ascending: false })
-        .limit(PAGE_SIZE)
+        .limit(MEDIA_PAGE_SIZE)
         .offset(offset)
         .exe();
 
-      const settled = await Promise.allSettled(
-        assets.map(async (a): Promise<PhotoItem | null> => {
-          try {
-            const [uri, mediaType, width, height, creationTime, duration] = await Promise.all([
-              a.getUri(),
-              a.getMediaType(),
-              a.getWidth(),
-              a.getHeight(),
-              a.getCreationTime(),
-              a.getDuration(),
-            ]);
-            if (mediaType !== MediaType.IMAGE && mediaType !== MediaType.VIDEO) return null;
-            return {
-              asset: a,
-              id: a.id,
-              uri,
-              mediaType,
-              width,
-              height,
-              creationTime: creationTime ?? 0,
-              duration,
-            };
-          } catch {
-            return null;
-          }
-        })
-      );
-
-      const pageItems = settled
-        .filter((s): s is PromiseFulfilledResult<PhotoItem | null> => s.status === 'fulfilled')
-        .map((s) => s.value)
-        .filter((v): v is PhotoItem => v !== null);
+      const pageItems = await materializeAssets(assets, async (a): Promise<PhotoItem | null> => {
+        const [uri, mediaType, width, height, creationTime, duration] = await Promise.all([
+          a.getUri(),
+          a.getMediaType(),
+          a.getWidth(),
+          a.getHeight(),
+          a.getCreationTime(),
+          a.getDuration(),
+        ]);
+        if (mediaType !== MediaType.IMAGE && mediaType !== MediaType.VIDEO) return null;
+        return {
+          asset: a,
+          id: a.id,
+          uri,
+          mediaType,
+          width,
+          height,
+          creationTime: creationTime ?? 0,
+          duration,
+        };
+      });
 
       setItems((prev) => (reset ? pageItems : [...prev, ...pageItems]));
-      setHasMore(assets.length === PAGE_SIZE);
-      pageRef.current = reset ? PAGE_SIZE : offset + PAGE_SIZE;
+      setHasMore(assets.length === MEDIA_PAGE_SIZE);
+      pageRef.current = reset ? MEDIA_PAGE_SIZE : offset + MEDIA_PAGE_SIZE;
     } catch (e) {
       setError(e instanceof Error ? e : new Error(String(e)));
     } finally {

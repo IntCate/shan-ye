@@ -18,6 +18,7 @@
  */
 
 import { XMLParser } from 'fast-xml-parser';
+import { strFromU8, unzipSync } from 'fflate';
 
 import type { MapRegion } from '@/types/map';
 import type { Route, RoutePoint, RouteSegment } from '@/types/route';
@@ -266,26 +267,62 @@ function parseGpx(content: string, baseName: string, existingCount: number): Rou
 }
 
 /**
- * 解析路径文件入口：按扩展名分发到 KML/GPX 解析器。
+ * 解析 KMZ 文件（ZIP 压缩的 KML）。
+ *
+ * KMZ 是 Google Earth 的标准打包格式，本质是一个 ZIP 文件，内部通常含 `doc.kml`
+ * 及可能的图标/图片资源。用 fflate（纯 JS ZIP 解压器）解压后提取 KML 文本，
+ * 再复用 parseKml 解析。
+ */
+function parseKmz(data: Uint8Array, baseName: string, existingCount: number): Route[] {
+  const files = unzipSync(data);
+  // 优先取 doc.kml（Google Earth 默认名），否则取第一个 .kml 文件
+  const kmlName =
+    Object.keys(files).find((n) => n.toLowerCase() === 'doc.kml') ??
+    Object.keys(files).find((n) => n.toLowerCase().endsWith('.kml'));
+
+  if (!kmlName) {
+    throw new Error('KMZ 文件中未找到 .kml 文件');
+  }
+
+  const kmlText = strFromU8(files[kmlName]);
+  const routes = parseKml(kmlText, baseName, existingCount);
+  // 覆盖 format 与 id 前缀，标识来源为 KMZ
+  return routes.map((r) => ({
+    ...r,
+    format: 'kmz' as const,
+    id: r.id.replace(/^kml-/, 'kmz-'),
+  }));
+}
+
+/**
+ * 解析路径文件入口：按扩展名分发到 KML/GPX/KMZ 解析器。
+ *
  * @param filename 文件名（含扩展名），用于判断格式与回退名称
- * @param content 文件文本内容（UTF-8）
+ * @param content 文件内容：KML/GPX 为 UTF-8 文本字符串，KMZ 为二进制 Uint8Array
  * @param existingCount 当前已导入的路线数，用于颜色循环分配
  * @returns 解析出的路线数组（可能为空）
  * @throws 不支持的格式或 XML 解析失败时抛出带文件名的错误
  */
-export function parseRouteFile(filename: string, content: string, existingCount = 0): Route[] {
+export function parseRouteFile(
+  filename: string,
+  content: string | Uint8Array,
+  existingCount = 0
+): Route[] {
   const ext = filename.toLowerCase().split('.').pop() ?? '';
   const baseName = filename.replace(/\.[^.]+$/, '') || '未命名路径';
 
-  if (ext === 'kml') return parseKml(content, baseName, existingCount);
-  if (ext === 'gpx') return parseGpx(content, baseName, existingCount);
+  if (ext === 'kmz') return parseKmz(content as Uint8Array, baseName, existingCount);
+  if (ext === 'kml') return parseKml(content as string, baseName, existingCount);
+  if (ext === 'gpx') return parseGpx(content as string, baseName, existingCount);
 
-  // 无扩展名时按内容嗅探根标签
-  const head = content.trimStart().slice(0, 200).toLowerCase();
-  if (head.includes('<kml')) return parseKml(content, baseName, existingCount);
-  if (head.includes('<gpx')) return parseGpx(content, baseName, existingCount);
+  // 无扩展名时按内容嗅探根标签（仅文本格式支持嗅探，KMZ 是二进制无法嗅探）
+  if (typeof content === 'string') {
+    const head = content.trimStart().slice(0, 200).toLowerCase();
+    if (head.includes('<kml')) return parseKml(content, baseName, existingCount);
+    if (head.includes('<gpx')) return parseGpx(content, baseName, existingCount);
+  }
 
-  throw new Error(`不支持的文件格式：${ext || '未知'}（仅支持 .kml / .gpx）`);
+  throw new Error(`不支持的文件格式：${ext || '未知'}（仅支持 .kml / .gpx / .kmz）`);
 }
 
 /**

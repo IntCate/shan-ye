@@ -7,35 +7,40 @@
  * - 定位失败：回退到默认坐标（INITIAL_REGION）
  *
  * 地图交互：
- * - 长按空白：在该点显示浮动信息卡片（经纬度），不用 Marker/Callout，无图标无竞态
+ * - 长按空白：显示红点 + 悬浮坐标卡片（含名称输入与「添加/收藏」按钮），确认后加入收藏地点
  * - 单击空白：清空 Marker 与浮动卡片
  * - 搜索框：输入地址跳转并落 Marker
  * - 定位按钮：跳回当前位置
+ * - 绘制按钮：打开轨迹录制面板（开始/暂停/继续/结束，统计里程/耗时/海拔）
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, StyleSheet, View, useColorScheme } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, Platform, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import * as ImagePicker from 'expo-image-picker';
+import { Asset, requestPermissionsAsync as requestMediaLibraryPermissionsAsync } from 'expo-media-library';
 
-import { BubbleTail } from '@/components/bubble-tail';
-import { GlassPanel } from '@/components/glass-panel';
 import { MapFloatingButton } from '@/components/map-floating-button';
 import { MapLayerMenu, type LayerKey } from '@/components/map-layer-menu';
+import { MapSavePlaceCard } from '@/components/map-save-place-card';
 import { MapSearchBar } from '@/components/map-search-bar';
 import { PhotoDetailSheet } from '@/components/photo-detail-sheet';
 import { ProfileSheet } from '@/components/profile-sheet';
-import { RouteManagerPanel } from '@/components/route-manager-panel';
 import { SatelliteMap } from '@/components/satellite-map';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { TrackRecordPanel } from '@/components/track-record-panel';
 import { INITIAL_REGION } from '@/constants/map';
-import { Glass, Spacing } from '@/constants/theme';
+import { Spacing } from '@/constants/theme';
 import { useGeotaggedPhotos } from '@/hooks/use-geotagged-photos';
-import { useHeading } from '@/hooks/use-heading';
 import { useLocation } from '@/hooks/use-location';
+import { useMediaCount } from '@/hooks/use-media-count';
+import { useAuth } from '@/hooks/use-auth';
 import { useRoutes } from '@/hooks/use-routes';
+import { usePlaces } from '@/hooks/use-places';
 import { useTheme } from '@/hooks/use-theme';
-import type { GeoTaggedPhoto } from '@/types/geotagged-photo';
+import { useTrackRecorder } from '@/hooks/use-track-recorder';
+import type { GeoTaggedPhoto, PhotoCluster } from '@/types/geotagged-photo';
 import type {
   GeoPoint,
   MapLongPressEvent,
@@ -45,37 +50,29 @@ import type {
   SatelliteMapHandle,
   UserLocationUpdate,
 } from '@/types/map';
+import type { Place } from '@/types/place';
+import type { Route } from '@/types/route';
 import { wgs84ToGcj02, withConvertedCoords } from '@/utils/coord-transform';
 import { getRouteRegion } from '@/utils/route-parser';
 
 /** 定位成功后的缩放级别（约城市街区尺度）。 */
 const LOCATE_DELTA = 0.02;
 
-/** 长按位置红色标记小球尺寸（px）。 */
-const DOT_SIZE = 12;
-const DOT_RADIUS = DOT_SIZE / 2;
+/** 底部搜索框高度 + 间距：悬浮按钮组的底部偏移量（置于搜索框上方，避免重叠）。 */
+const BOTTOM_BAR_OFFSET = 72;
 
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const mapRef = useRef<SatelliteMapHandle>(null);
   const [markers, setMarkers] = useState<MapMarker[]>([]);
-  // 长按查坐标的浮动信息卡片（null = 不显示）；用屏幕像素坐标定位，不在 react-native-maps 内
-  const [popup, setPopup] = useState<{
-    x: number;
-    y: number;
-    title: string;
-    subtitle: string;
-  } | null>(null);
   // null = 定位中；非 null = 定位完成（成功取当前位置，失败取默认坐标）
   const [resolvedRegion, setResolvedRegion] = useState<MapRegion | null>(null);
   const location = useLocation();
-  // 设备磁力计真北朝向：驱动地图蓝点上的 heading cone（半透明锥形方向指示）。
-  // Web 端 available=false，heading=null，SatelliteMap 不渲染 cone。
-  const heading = useHeading();
   const theme = useTheme();
-  const isDark = useColorScheme() === 'dark';
   // 设备照片 EXIF 地理标记：在地图上以图片 Marker 形式展示，点击弹出底部详情面板
   const { photos } = useGeotaggedPhotos();
+  // 设备相册照片+视频总数：供「我的」面板统计项「照片」显示
+  const photoCount = useMediaCount();
   // 当前选中的照片（非 null 时弹出底部详情面板）
   const [selectedPhoto, setSelectedPhoto] = useState<GeoTaggedPhoto | null>(null);
   // 地图图层类型（标准 / 卫星 / 天气），由「我的」面板切换
@@ -104,16 +101,34 @@ export default function HomeScreen() {
     height: number;
   } | null>(null);
   // 导入的路径文件（KML/GPX），会话级保留；在地图上以 Polyline 形式展示
-  const { routes, loading: routeLoading, error: routeError, importRoute, toggleRoute, cycleCoordMode, removeRoute, clearError } = useRoutes();
-  // 路径管理浮层是否展开
-  const [routePanelVisible, setRoutePanelVisible] = useState(false);
+  const {
+    routes,
+    loading: routeLoading,
+    error: routeError,
+    importRoute,
+    addRecordedRoute,
+    toggleRoute,
+    cycleCoordMode,
+    removeRoute,
+    clearError,
+  } = useRoutes();
   // 「我的」个人中心底部卡片是否展开
   const [profileVisible, setProfileVisible] = useState(false);
-  // 「路径」按钮在按钮组内的位置/尺寸，用于把浮层定位到按钮左侧并垂直居中
-  const [routeBtnLayout, setRouteBtnLayout] = useState<{
+  // 登录态：本地模拟认证（AsyncStorage 持久化），「我的」面板头像/昵称展示。
+  // 登录面板由 ProfileSheet 内部嵌套渲染（二级面板），登录/退出均经此回调。
+  const { user, hydrated, login, logout } = useAuth();
+  // 收藏地点（长按地图保存的坐标点），会话级内存存储
+  const { places, addPlace, removePlace } = usePlaces();
+  // 路径绘制（轨迹录制）：状态机 + GPS 采集由 hook 持有；面板显隐由本页控制（关闭不停止录制）
+  const tracker = useTrackRecorder();
+  const [trackPanelVisible, setTrackPanelVisible] = useState(false);
+  // 长按地图待保存的地点：坐标 + 长按点像素坐标（null = 不显示）。
+  // 悬浮坐标卡片与红点直接渲染在长按点上方（MapSavePlaceCard 内部实现）。
+  const [savePlaceTarget, setSavePlaceTarget] = useState<{
+    latitude: number;
+    longitude: number;
+    x: number;
     y: number;
-    width: number;
-    height: number;
   } | null>(null);
 
   // 打开 app 时自动定位；失败回退默认坐标
@@ -133,54 +148,92 @@ export default function HomeScreen() {
     };
   }, [location.requestAndLocate]);
 
-  /** 统一封装编程移动地图：先清浮动卡片与图层浮层（像素坐标随地图移动失效），再 animate。
-   *  新增地图操作（定位/搜索/其他按钮）只需调 moveMap，无需手动清 popup / 关浮层。
+  /** 统一封装编程移动地图：先清保存卡片与图层浮层（像素坐标随地图移动失效），再 animate。
+   *  新增地图操作（定位/搜索/其他按钮）只需调 moveMap，无需手动清卡片 / 关浮层。
    *  手势拖拽由 onRegionChange 兜底清除。 */
-  const moveMap = (region: MapRegion, durationMs = 600) => {
-    setPopup(null);
+  const moveMap = useCallback((region: MapRegion, durationMs = 600) => {
+    setSavePlaceTarget(null);
     setLayerMenuVisible(false);
-    setRoutePanelVisible(false);
     mapRef.current?.animateToRegion(region, durationMs);
-  };
+  }, []);
 
-  const handleSelectResult = (point: GeoPoint, title: string) => {
-    setMarkers([{ ...point, title }]); // 搜索结果：显示默认大头针图标
-    moveMap({ ...point, latitudeDelta: 0.01, longitudeDelta: 0.01 });
-  };
+  const handleSelectResult = useCallback(
+    (point: GeoPoint, title: string) => {
+      setMarkers([{ ...point, title }]); // 搜索结果：显示默认大头针图标
+      moveMap({ ...point, latitudeDelta: 0.01, longitudeDelta: 0.01 });
+    },
+    [moveMap]
+  );
 
-  // 长按地图空白：在该点显示浮动信息卡片（经纬度），不用 Marker/Callout，无图标无竞态
-  const handleMapLongPress = (e: MapLongPressEvent) => {
+  // 长按地图空白：显示红点 + 悬浮坐标卡片（名称输入 + 添加/收藏按钮，MapSavePlaceCard 实现）。
+  // 地图点击/移动/保存后关闭。
+  const handleMapLongPress = useCallback((e: MapLongPressEvent) => {
     setMarkers([]); // 清搜索 Marker
-    setPopup({
+    setSavePlaceTarget({
+      latitude: e.coordinate.latitude,
+      longitude: e.coordinate.longitude,
       x: e.position.x,
       y: e.position.y,
-      title: `纬度 ${e.coordinate.latitude.toFixed(6)}°`,
-      subtitle: `经度 ${e.coordinate.longitude.toFixed(6)}°`,
     });
-  };
+  }, []);
 
-  // 单击地图空白：清空 Marker、浮动卡片与图层/路径浮层
-  const handleMapPress = () => {
+  // 单击地图空白：清空 Marker、保存卡片与图层浮层
+  const handleMapPress = useCallback(() => {
     setMarkers([]);
-    setPopup(null);
+    setSavePlaceTarget(null);
     setLayerMenuVisible(false);
-    setRoutePanelVisible(false);
-  };
+  }, []);
 
-  // 手势拖拽/缩放时浮动卡片像素坐标失效，需清除；图层/路径浮层一并关闭。
+  // 手势拖拽/缩放时保存卡片像素坐标失效，需清除；图层浮层一并关闭。
   // 编程移动（定位/搜索）由 moveMap 统一清；此处仅兜底手势场景。
-  const handleRegionChange = () => {
-    setPopup(null);
+  const handleRegionChange = useCallback(() => {
+    setSavePlaceTarget(null);
     setLayerMenuVisible(false);
-    setRoutePanelVisible(false);
-  };
+  }, []);
+
+  // 个人面板点击地点：定位到该地点（与点击路径定位行为一致，面板保持打开）
+  const handleSelectPlace = useCallback(
+    (place: Place) => {
+      moveMap({
+        latitude: place.latitude,
+        longitude: place.longitude,
+        latitudeDelta: LOCATE_DELTA,
+        longitudeDelta: LOCATE_DELTA,
+      });
+    },
+    [moveMap]
+  );
+
+  // 点击照片簇：放大到簇内照片包围盒（四周 20% 边距），簇随缩放逐步展开为单张照片 Marker。
+  // 缩放级别由簇内照片的地理跨度决定；极端小跨度（近似同点）用最小 delta 兜底。
+  const handlePhotoClusterPress = useCallback(
+    (cluster: PhotoCluster) => {
+      let minLat = Infinity;
+      let maxLat = -Infinity;
+      let minLng = Infinity;
+      let maxLng = -Infinity;
+      for (const p of cluster.photos) {
+        if (p.latitude < minLat) minLat = p.latitude;
+        if (p.latitude > maxLat) maxLat = p.latitude;
+        if (p.longitude < minLng) minLng = p.longitude;
+        if (p.longitude > maxLng) maxLng = p.longitude;
+      }
+      moveMap({
+        latitude: (minLat + maxLat) / 2,
+        longitude: (minLng + maxLng) / 2,
+        latitudeDelta: Math.max((maxLat - minLat) * 1.4, 0.005),
+        longitudeDelta: Math.max((maxLng - minLng) * 1.4, 0.005),
+      });
+    },
+    [moveMap]
+  );
 
   // 蓝点由系统持续定位（精度通常高于单次快照）。缓存其最新坐标，供首帧对齐与定位按钮复用，
   // 确保地图中心与蓝点始终同源、不会因"快照 vs 系统定位"两源不一致而漂移。
   const alignedRef = useRef(false);
   const userLocationRef = useRef<UserLocationUpdate | null>(null);
 
-  const handleLocate = async () => {
+  const handleLocate = useCallback(async () => {
     // 优先用蓝点最新坐标（与蓝点同源，必然居中）
     if (userLocationRef.current) {
       moveMap({
@@ -199,22 +252,78 @@ export default function HomeScreen() {
         longitudeDelta: LOCATE_DELTA,
       });
     }
-  };
+  }, [moveMap, location.requestAndLocate]);
 
-  const handleUserLocationChange = (loc: UserLocationUpdate) => {
-    userLocationRef.current = loc; // 始终缓存最新蓝点坐标，供定位按钮复用
-    if (alignedRef.current) return; // 仅首帧对齐一次，避免持续跟随
-    alignedRef.current = true;
-    moveMap(
-      {
-        latitude: loc.latitude,
-        longitude: loc.longitude,
-        latitudeDelta: LOCATE_DELTA,
-        longitudeDelta: LOCATE_DELTA,
-      },
-      0 // 无动画：与首帧无缝衔接，仅修正两源偏差（通常仅几十米，肉眼不可见）
-    );
-  };
+  const handleUserLocationChange = useCallback(
+    (loc: UserLocationUpdate) => {
+      userLocationRef.current = loc; // 始终缓存最新蓝点坐标，供定位按钮复用
+      if (alignedRef.current) return; // 仅首帧对齐一次，避免持续跟随
+      alignedRef.current = true;
+      moveMap(
+        {
+          latitude: loc.latitude,
+          longitude: loc.longitude,
+          latitudeDelta: LOCATE_DELTA,
+          longitudeDelta: LOCATE_DELTA,
+        },
+        0 // 无动画：与首帧无缝衔接，仅修正两源偏差（通常仅几十米，肉眼不可见）
+      );
+    },
+    [moveMap]
+  );
+
+  // 右侧按钮组「拍照」：调用系统相机拍摄，照片自动保存到系统相册。
+  // 相册媒体监听（mediaLibraryDidChange）会感知新照片，地图照片标记随之增量出现。
+  const handleTakePhoto = useCallback(async () => {
+    const perm = await ImagePicker.requestCameraPermissionsAsync();
+    if (!perm.granted) {
+      Alert.alert('无法使用相机', '请在系统设置中允许 Omni 访问相机。');
+      return;
+    }
+    try {
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ['images'],
+        quality: 1,
+      });
+      if (result.canceled || result.assets.length === 0) return;
+      const uri = result.assets[0].uri;
+      // web 端 MediaLibrary 保存能力有限，仅原生端保存到系统相册。
+      // SDK 57 用新的 class-based API（Asset.create）替代已废弃的 saveToLibraryAsync。
+      if (Platform.OS !== 'web') {
+        const { status } = await requestMediaLibraryPermissionsAsync(true);
+        if (status !== 'granted') {
+          Alert.alert('无法保存照片', '请在系统设置中允许 Omni 保存照片到相册。');
+          return;
+        }
+        await Asset.create(uri);
+      }
+    } catch (err) {
+      console.error('[handleTakePhoto] 拍照或保存失败', err);
+      Alert.alert('拍照失败', '无法调用相机，请重试。');
+    }
+  }, []);
+
+  // 可见路径（图层总开关为关时为空数组）：稳定引用，避免每次渲染新建数组破坏 RoutePolylines 的 memo 隔离。
+  const visibleRoutes = useMemo(() => (layers.routes ? routes : []), [layers.routes, routes]);
+  // 录制中的实时轨迹：作为一条临时 Route（红色）叠加显示，结束后转为正式路线
+  const liveRoute = useMemo<Route | null>(() => {
+    if (tracker.status === 'idle' || tracker.points.length < 2) return null;
+    return {
+      id: 'live-record',
+      name: '绘制中',
+      format: 'record',
+      segments: [{ points: tracker.points }],
+      originalSegments: [{ points: tracker.points }],
+      visible: true,
+      color: '#FF3B30',
+      coordMode: 'raw',
+      importedAt: Date.now(),
+    };
+  }, [tracker.status, tracker.points]);
+  const mapRoutes = useMemo(
+    () => (liveRoute ? [...visibleRoutes, liveRoute] : visibleRoutes),
+    [visibleRoutes, liveRoute]
+  );
 
   // 定位中：显示 loading，不渲染地图
   if (!resolvedRegion) {
@@ -238,33 +347,73 @@ export default function HomeScreen() {
         mapType={mapType}
         markers={markers}
         photoMarkers={photoMarkers}
-        routes={layers.routes ? routes : []}
-        heading={heading.heading}
+        routes={mapRoutes}
         onPhotoPress={setSelectedPhoto}
+        onClusterPress={handlePhotoClusterPress}
         showsUserLocation
+        onRegionChangeComplete={handleRegionChange}
         onUserLocationChange={handleUserLocationChange}
         onPress={handleMapPress}
         onLongPress={handleMapLongPress}
         onRegionChange={handleRegionChange}
       />
 
-      <View style={[styles.searchWrap, { top: insets.top + Spacing.two }]}>
+      {/* 底部搜索框：位于原 Tab 栏位置，结果列表向上展开（见 MapSearchBar） */}
+      <View style={[styles.searchWrap, { bottom: insets.bottom + Spacing.two }]}>
+
         <MapSearchBar onSelect={handleSelectResult} />
       </View>
 
-      {/* 右下悬浮操作组：我的 / 图层 / 定位（自上而下）。
-          NativeTabs 把底部 Tab 栏计入子页面 insets.bottom，故此处只需 insets.bottom + 间距。
+      {/* 长按地图「保存地点」悬浮卡片：红点 + 坐标卡片渲染在长按点上方（内部实现）；
+          地图点击/移动/保存后由 moveMap/handleMapPress 关闭 */}
+      {savePlaceTarget && (
+        <MapSavePlaceCard
+          latitude={savePlaceTarget.latitude}
+          longitude={savePlaceTarget.longitude}
+          x={savePlaceTarget.x}
+          y={savePlaceTarget.y}
+          defaultName={`地点 ${places.length + 1}`}
+          onSave={(name) => {
+            addPlace(name, savePlaceTarget.latitude, savePlaceTarget.longitude);
+            setSavePlaceTarget(null);
+          }}
+          onClose={() => {
+            setSavePlaceTarget(null);
+          }}
+        />
+      )}
+
+      {/* 右下悬浮操作组：我的 / 拍照 / 路径绘制 / 图层 / 定位（自上而下）。
+          无底部 Tab：按钮组置于底部搜索框上方（bottom 含 BOTTOM_BAR_OFFSET 偏移）。
           图层选择器浮层作为本容器的 absolute 子元素，定位到「图层」按钮左侧并垂直居中。 */}
-      <View style={[styles.floatingBtns, { bottom: insets.bottom + Spacing.three }]}>
+      <View style={[styles.floatingBtns, { bottom: insets.bottom + BOTTOM_BAR_OFFSET }]}>
         <MapFloatingButton
           symbol={{ ios: 'person.fill', android: 'person', web: 'person' }}
           onPress={() => {
-            // 互斥：打开「我的」时关闭图层/路径浮层
+            // 互斥：打开「我的」时关闭图层浮层
             setLayerMenuVisible(false);
-            setRoutePanelVisible(false);
             setProfileVisible(true);
           }}
           accessibilityLabel="我的"
+        />
+        <MapFloatingButton
+          symbol={{ ios: 'camera.fill', android: 'camera_alt', web: 'camera_alt' }}
+          onPress={handleTakePhoto}
+          accessibilityLabel="拍照"
+        />
+        <MapFloatingButton
+          symbol={{
+            ios: 'point.topleft.down.curvedto.point.bottomright.up',
+            android: 'route',
+            web: 'route',
+          }}
+          onPress={() => {
+            // 互斥：打开「路径绘制」时关闭图层浮层与个人面板
+            setLayerMenuVisible(false);
+            setProfileVisible(false);
+            setTrackPanelVisible(true);
+          }}
+          accessibilityLabel="路径绘制"
         />
         {/* 包一层 View 以 onLayout 取「图层」按钮在按钮组内的位置/尺寸，供浮层定位 */}
         <View
@@ -275,39 +424,14 @@ export default function HomeScreen() {
           <MapFloatingButton
             symbol={{ ios: 'square.stack.3d.up.fill', android: 'layers', web: 'layers' }}
             onPress={() => {
-              // 互斥：打开图层菜单时关闭路径面板；已打开则仅关闭自己（toggle off）
+              // 互斥：已打开则仅关闭自己（toggle off）；未打开则展开（多选器常驻）
               if (layerMenuVisible) {
                 setLayerMenuVisible(false);
               } else {
-                setRoutePanelVisible(false);
                 setLayerMenuVisible(true);
               }
             }}
             accessibilityLabel="图层"
-          />
-        </View>
-        {/* 「路径」按钮：同 onLayout 模式测量位置，供路径管理浮层定位 */}
-        <View
-          onLayout={(e) => {
-            const { y, width, height } = e.nativeEvent.layout;
-            setRouteBtnLayout({ y, width, height });
-          }}>
-          <MapFloatingButton
-            symbol={{
-              ios: 'point.topleft.down.curvedto.point.bottomright.up',
-              android: 'route',
-              web: 'route',
-            }}
-            onPress={() => {
-              // 互斥：打开路径面板时关闭图层菜单；已打开则仅关闭自己（toggle off）
-              if (routePanelVisible) {
-                setRoutePanelVisible(false);
-              } else {
-                setLayerMenuVisible(false);
-                setRoutePanelVisible(true);
-              }
-            }}
-            accessibilityLabel="路径"
           />
         </View>
         <MapFloatingButton
@@ -335,83 +459,68 @@ export default function HomeScreen() {
             />
           </View>
         )}
-
-        {/* 路径管理浮层：同图层浮层定位模式，absolute 到「路径」按钮左侧并垂直居中。
-            导入后自动定位到最后一条路线；点击路线名称定位并收起浮层。 */}
-        {routePanelVisible && routeBtnLayout && (
-          <View
-            style={[
-              styles.routePanel,
-              {
-                top: routeBtnLayout.y,
-                height: routeBtnLayout.height,
-                right: routeBtnLayout.width + Spacing.two,
-              },
-            ]}>
-            <RouteManagerPanel
-              routes={routes}
-              loading={routeLoading}
-              error={routeError}
-              onImport={async () => {
-                const imported = await importRoute();
-                if (imported && imported.length > 0) {
-                  // 导入后自动定位到最后一条路线的包围盒
-                  moveMap(getRouteRegion(imported[imported.length - 1]));
-                }
-              }}
-              onToggle={toggleRoute}
-              onCycleCoordMode={cycleCoordMode}
-              onRemove={removeRoute}
-              onSelect={(route) => {
-                moveMap(getRouteRegion(route));
-              }}
-              onDismissError={clearError}
-            />
-          </View>
-        )}
       </View>
 
-      {popup && (
-        <>
-          {/* 红色小球：标记长按位置 */}
-          <View
-            pointerEvents="none"
-            style={[styles.popupDot, { left: popup.x, top: popup.y }]}
-          />
-          {/* 信息卡片 + 尾巴：尾巴尖端指向小球顶部 */}
-          <View
-            pointerEvents="none"
-            style={[
-              styles.popup,
-              { left: popup.x, top: popup.y - DOT_RADIUS - Spacing.two },
-            ]}>
-            <GlassPanel style={styles.popupCardOuter} contentStyle={styles.popupCardContent}>
-              <ThemedText type="smallBold" numberOfLines={1}>
-                {popup.title}
-              </ThemedText>
-              <ThemedText type="small" themeColor="textSecondary" numberOfLines={1}>
-                {popup.subtitle}
-              </ThemedText>
-            </GlassPanel>
-            <BubbleTail
-              direction="down"
-              color={isDark ? Glass.overlayDark : Glass.overlayLight}
-              size={6}
-            />
-          </View>
-        </>
-      )}
+      {/* 路径绘制面板：右侧「路径绘制」按钮打开；开始/暂停/继续/结束由面板按钮控制。
+          关闭面板不停止录制（hook 在本页持有，GPS 订阅继续），重新打开可查看进度。 */}
+      <TrackRecordPanel
+        visible={trackPanelVisible}
+        status={tracker.status}
+        pointCount={tracker.points.length}
+        distanceM={tracker.distanceM}
+        elapsedMs={tracker.elapsedMs}
+        altitudeM={tracker.altitudeM}
+        onStart={async () => {
+          const ok = await tracker.start();
+          if (!ok) {
+            Alert.alert('无法开始录制', '请在系统设置中允许 Omni 访问位置。');
+          }
+        }}
+        onPause={tracker.pause}
+        onResume={tracker.resume}
+        onStop={() => {
+          const pts = tracker.stop();
+          if (pts.length >= 2) addRecordedRoute(pts);
+          setTrackPanelVisible(false);
+        }}
+        onClose={() => setTrackPanelVisible(false)}
+      />
 
       {/* 照片详情面板：点击地图照片图片 Marker 后从底部滑出 */}
       <PhotoDetailSheet photo={selectedPhoto} onClose={() => setSelectedPhoto(null)} />
 
-      {/* 「我的」个人中心面板：点击「我的」按钮后从底部滑出 */}
+      {/* 「我的」个人中心面板：点击「我的」按钮后从底部滑出。
+          路径管理（原右侧按钮组「路径」按钮功能）已迁移到「路径」扩展态：
+          导入后自动定位到最后一条路线；点击路线名称定位。 */}
       <ProfileSheet
         visible={profileVisible}
-        photoCount={photos.length}
+        user={user}
+        photoCount={photoCount}
         routeCount={routes.length}
+        routes={routes}
+        placeCount={places.length}
+        places={places}
+        onRemovePlace={removePlace}
+        onSelectPlace={handleSelectPlace}
         mapType={mapType}
         onMapTypeChange={setMapType}
+        routeLoading={routeLoading}
+        routeError={routeError}
+        onImportRoute={async () => {
+          const imported = await importRoute();
+          if (imported && imported.length > 0) {
+            moveMap(getRouteRegion(imported[imported.length - 1]));
+          }
+        }}
+        onToggleRoute={toggleRoute}
+        onCycleCoordMode={cycleCoordMode}
+        onRemoveRoute={removeRoute}
+        onSelectRoute={(route) => {
+          moveMap(getRouteRegion(route));
+        }}
+        onDismissRouteError={clearError}
+        onLogin={login}
+        onLogout={logout}
         onClose={() => setProfileVisible(false)}
       />
     </ThemedView>
@@ -439,7 +548,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     right: Spacing.four,
     flexDirection: 'column',
-    gap: Spacing.two,
+    gap: Spacing.three,
   },
   /** 图层选择器浮层定位容器：right 把容器推到「图层」按钮左侧，top/height 运行时对齐按钮，
    *  内部 justifyContent 居中菜单、alignItems 让菜单右对齐紧贴按钮。 */
@@ -447,41 +556,5 @@ const styles = StyleSheet.create({
     position: 'absolute',
     justifyContent: 'center',
     alignItems: 'flex-end',
-  },
-  /** 路径管理浮层定位容器：结构与 layerMenu 一致，定位到「路径」按钮左侧。 */
-  routePanel: {
-    position: 'absolute',
-    justifyContent: 'center',
-    alignItems: 'flex-end',
-  },
-  popup: {
-    position: 'absolute',
-    alignItems: 'center',
-    transform: [{ translateX: '-50%' }, { translateY: '-100%' }],
-  },
-  /** 外层：圆角 + 阴影 + 最大宽度（不裁剪，阴影可见） */
-  popupCardOuter: {
-    borderRadius: 8,
-    maxWidth: 240,
-    shadowColor: '#000',
-    shadowOpacity: 0.2,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 4,
-  },
-  /** 内层内容：padding/gap 移到 contentStyle */
-  popupCardContent: {
-    padding: Spacing.two,
-    gap: 2,
-  },
-  popupDot: {
-    position: 'absolute',
-    width: DOT_SIZE,
-    height: DOT_SIZE,
-    borderRadius: DOT_RADIUS,
-    backgroundColor: '#FF3B30',
-    borderWidth: 2,
-    borderColor: '#ffffff',
-    transform: [{ translateX: '-50%' }, { translateY: '-50%' }],
   },
 });

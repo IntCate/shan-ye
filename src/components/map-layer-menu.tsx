@@ -13,7 +13,7 @@ import { Pressable, StyleSheet, View, useColorScheme } from 'react-native';
 import { BubbleTail } from '@/components/bubble-tail';
 import { GlassPanel } from '@/components/glass-panel';
 import { ThemedText } from '@/components/themed-text';
-import { Glass, Spacing } from '@/constants/theme';
+import { Glass, Shadow, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 
 /** 可勾选的图层项。 */
@@ -82,11 +82,7 @@ const styles = StyleSheet.create({
   cardOuter: {
     borderRadius: 12,
     minWidth: 150,
-    shadowColor: '#000',
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 6,
+    ...Shadow.lg,
   },
   /** 内层内容：纵向 padding 移到 contentStyle */
   cardContent: {

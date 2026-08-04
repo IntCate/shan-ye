@@ -48,7 +48,12 @@ export function useHeading(): HeadingState {
             setState((s) => (s.heading === null ? s : { heading: null, accuracy: h.accuracy }));
             return;
           }
-          setState({ heading: h.trueHeading, accuracy: h.accuracy });
+          // 值相等短路：磁力计事件 ~10Hz，相同值不新建 state 对象（避免触发下游重渲染）
+          setState((s) =>
+            s.heading === h.trueHeading && s.accuracy === h.accuracy
+              ? s
+              : { heading: h.trueHeading, accuracy: h.accuracy }
+          );
         });
       } catch (e) {
         // 模拟器无磁力计时会失败，静默降级为不可用

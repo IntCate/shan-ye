@@ -1,50 +1,55 @@
 /**
- * 相册容器（native）。
+ * 照片库组件（native）。
  *
- * 职责：权限门控（undetermined / denied / limited / granted 四态）+ 顶栏 + 网格 + 查看器编排。
- * 权限通过后才挂载 PhotoAlbumContent（内含 usePhotoAlbum），避免无权限时白白查询。
+ * 原相册页（explore Tab）功能迁入「我的」面板的「照片」扩展态：
+ * 权限门控（undetermined / denied / limited / granted 四态）+ limited 条幅 + 网格 + 查看器编排。
+ * 权限通过后才挂载 PhotoLibraryContent（内含 usePhotoAlbum），避免无权限时白白查询。
+ * 无顶栏 / safe-area（由宿主面板提供），组件撑满父容器。
  */
 
-import { presentPermissionsPicker, usePermissions } from 'expo-media-library';
+import { presentPermissionsPicker } from 'expo-media-library';
 import { useState } from 'react';
 import { Linking, Pressable, StyleSheet, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { BottomTabInset, Spacing } from '@/constants/theme';
+import { Spacing } from '@/constants/theme';
+import { useMediaLibraryPermission } from '@/hooks/use-media-library-permission';
 import { usePhotoAlbum } from '@/hooks/use-photo-album';
 import type { Rect } from '@/types/photo-album';
 
 import { PhotoGrid } from './photo-grid';
 import { PhotoViewer } from './photo-viewer';
 
-export function PhotoAlbum() {
-  const insets = useSafeAreaInsets();
-  const [perm, requestPermission] = usePermissions();
-  const granted = perm?.status === 'granted';
+export function PhotoLibrary({
+  onViewerOpenChange,
+}: {
+  /** 查看器打开状态变化通知：宿主（个人面板）据此在查看器打开期间禁用下滑/点击关闭，
+   *  防止 overFullScreen 透明 Modal 层叠的触摸穿透误关面板。 */
+  onViewerOpenChange?: (open: boolean) => void;
+}) {
+  const { status, limited, requestPermission } = useMediaLibraryPermission();
 
   return (
-    <ThemedView style={styles.container}>
-      {!perm || perm.status === 'undetermined' ? (
+    // 负 margin 抵消宿主面板 expandedContent 的水平 padding（16px），让 PhotoGrid
+    // 按全屏宽计算的格子尺寸（cellSize 基于 screenWidth）铺满面板宽度，不溢出。
+    <View style={styles.container}>
+      {status === 'undetermined' ? (
         <PermissionPrompt
-          text="相册需要访问权限以显示照片和视频"
+          text="照片面板需要访问相册以显示照片和视频"
           button="授权访问"
           onPress={() => requestPermission()}
         />
-      ) : perm.status === 'denied' ? (
+      ) : status === 'denied' ? (
         <PermissionPrompt
           text="权限被拒绝，请在系统设置中开启相册访问权限"
           button="前往设置"
           onPress={() => Linking.openSettings()}
         />
-      ) : granted ? (
-        <PhotoAlbumContent
-          limited={perm.accessPrivileges === 'limited'}
-          bottomInset={insets.bottom + BottomTabInset}
-        />
+      ) : status === 'granted' ? (
+        <PhotoLibraryContent limited={limited} onViewerOpenChange={onViewerOpenChange} />
       ) : null}
-    </ThemedView>
+    </View>
   );
 }
 
@@ -73,24 +78,29 @@ function PermissionPrompt({
 }
 
 /** 权限通过后的内容：数据 hook + limited 条幅 + 网格 + 查看器。 */
-function PhotoAlbumContent({
+function PhotoLibraryContent({
   limited,
-  bottomInset,
+  onViewerOpenChange,
 }: {
   limited: boolean;
-  bottomInset: number;
+  onViewerOpenChange?: (open: boolean) => void;
 }) {
-  const insets = useSafeAreaInsets();
-  const { items, loading, refreshing, hasMore, error, loadMore, refresh } = usePhotoAlbum();
+  const { items, loading, refreshing, error, loadMore, refresh } = usePhotoAlbum();
   const [viewer, setViewer] = useState<{ index: number; rect: Rect } | null>(null);
+
+  // 打开/关闭查看器时同步通知宿主：查看器打开期间个人面板禁用下滑/点击关闭，
+  // 避免 overFullScreen 透明 Modal 层叠的触摸穿透误关面板（查看器关闭后恢复）。
+  const openViewer = (index: number, rect: Rect) => {
+    setViewer({ index, rect });
+    onViewerOpenChange?.(true);
+  };
+  const closeViewer = () => {
+    setViewer(null);
+    onViewerOpenChange?.(false);
+  };
 
   return (
     <>
-      {/* 顶栏 */}
-      <View style={[styles.header, { paddingTop: insets.top + Spacing.two }]}>
-        <ThemedText type="subtitle">相册</ThemedText>
-      </View>
-
       {limited && (
         <View style={styles.limitedBanner}>
           <ThemedText type="small" themeColor="textSecondary">
@@ -118,9 +128,7 @@ function PhotoAlbumContent({
           items={items}
           loading={loading}
           refreshing={refreshing}
-          hasMore={hasMore}
-          bottomInset={bottomInset}
-          onItemPress={(index, rect) => setViewer({ index, rect })}
+          onItemPress={openViewer}
           onEndReached={loadMore}
           onRefresh={refresh}
         />
@@ -131,7 +139,7 @@ function PhotoAlbumContent({
           items={items}
           initialIndex={viewer.index}
           sourceRect={viewer.rect}
-          onClose={() => setViewer(null)}
+          onClose={closeViewer}
         />
       )}
     </>
@@ -141,10 +149,8 @@ function PhotoAlbumContent({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-  },
-  header: {
-    paddingHorizontal: Spacing.four,
-    paddingBottom: Spacing.four,
+    // 抵消宿主面板 expandedContent 的水平 padding，网格铺满面板宽度
+    marginHorizontal: -Spacing.three,
   },
   center: {
     flex: 1,
@@ -168,7 +174,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: Spacing.four,
     paddingVertical: Spacing.two,
   },
 });

@@ -68,6 +68,13 @@
             "video"
           ]
         }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "Omni 需要使用您的相机以拍摄照片。",
+          "microphonePermission": false
+        }
       ]
     ],
     "experiments": {
