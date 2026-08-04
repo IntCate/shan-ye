@@ -1,15 +1,15 @@
 {
   "expo": {
-    "name": "Omni",
-    "slug": "Omni",
+    "name": "山也",
+    "slug": "shanye",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "omni",
+    "scheme": "shanye",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "icon": "./assets/expo.icon",
-      "bundleIdentifier": "com.cwy.Omni"
+      "icon": "./assets/images/app-icon.png",
+      "bundleIdentifier": "com.cwy.shanye"
     },
     "android": {
       "adaptiveIcon": {
@@ -29,7 +29,7 @@
         "android.permission.READ_MEDIA_IMAGES",
         "android.permission.READ_MEDIA_VIDEO"
       ],
-      "package": "com.anonymous.Omni"
+      "package": "com.anonymous.shanye"
     },
     "web": {
       "output": "static",
@@ -48,7 +48,7 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "Omni 需要使用您的位置以在地图上定位。"
+          "locationWhenInUsePermission": "山也需要使用您的位置以在地图上定位。"
         }
       ],
       [
@@ -60,8 +60,8 @@
       [
         "expo-media-library",
         {
-          "photosPermission": "Omni 需要访问您的相册以显示照片和视频。",
-          "savePhotosPermission": "Omni 需要保存照片到您的相册。",
+          "photosPermission": "山也需要访问您的相册以显示照片和视频。",
+          "savePhotosPermission": "山也需要保存照片到您的相册。",
           "preventAutomaticLimitedAccessAlert": true,
           "granularPermissions": [
             "photo",
@@ -72,7 +72,7 @@
       [
         "expo-image-picker",
         {
-          "cameraPermission": "Omni 需要使用您的相机以拍摄照片。",
+          "cameraPermission": "山也需要使用您的相机以拍摄照片。",
           "microphonePermission": false
         }
       ]

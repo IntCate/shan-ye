@@ -19,7 +19,7 @@ export type User = {
   loginAt: number;
 };
 
-const STORAGE_KEY = '@omni/auth/user';
+const STORAGE_KEY = '@shanye/auth/user';
 
 type UseAuthResult = {
   /** 当前登录用户；null = 未登录。 */

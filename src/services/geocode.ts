@@ -48,7 +48,7 @@ export async function searchAddress(query: string, signal?: AbortSignal): Promis
       headers: {
         Accept: 'application/json',
         // iOS 端会被系统覆盖，Android/Web 生效
-        'User-Agent': 'Omni/1.0 (expo-maps-demo)',
+        'User-Agent': 'ShanYe/1.0 (expo-maps-demo)',
       },
     });
   } catch (e) {

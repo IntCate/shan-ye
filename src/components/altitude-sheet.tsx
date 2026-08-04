@@ -102,7 +102,7 @@ export function AltitudeSheet({ visible, onClose }: AltitudeSheetProps) {
     </>
   ) : denied ? (
     <ThemedText type="small" themeColor="textSecondary">
-      未获得定位权限，请在系统设置中允许 Omni 访问位置
+      未获得定位权限，请在系统设置中允许山也访问位置
     </ThemedText>
   ) : error ? (
     <ThemedText type="small" themeColor="textSecondary">

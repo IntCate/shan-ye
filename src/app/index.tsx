@@ -292,7 +292,7 @@ export default function HomeScreen() {
   const handleTakePhoto = useCallback(async () => {
     const perm = await ImagePicker.requestCameraPermissionsAsync();
     if (!perm.granted) {
-      Alert.alert('无法使用相机', '请在系统设置中允许 Omni 访问相机。');
+      Alert.alert('无法使用相机', '请在系统设置中允许山也访问相机。');
       return;
     }
     try {
@@ -307,7 +307,7 @@ export default function HomeScreen() {
       if (Platform.OS !== 'web') {
         const { status } = await requestMediaLibraryPermissionsAsync(true);
         if (status !== 'granted') {
-          Alert.alert('无法保存照片', '请在系统设置中允许 Omni 保存照片到相册。');
+          Alert.alert('无法保存照片', '请在系统设置中允许山也保存照片到相册。');
           return;
         }
         await Asset.create(uri);
@@ -515,7 +515,7 @@ export default function HomeScreen() {
         onStart={async () => {
           const ok = await tracker.start();
           if (!ok) {
-            Alert.alert('无法开始录制', '请在系统设置中允许 Omni 访问位置。');
+            Alert.alert('无法开始录制', '请在系统设置中允许山也访问位置。');
           }
         }}
         onPause={tracker.pause}
