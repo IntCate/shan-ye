@@ -32,7 +32,13 @@ export function AnimatedSplashOverlay() {
 
   if (!visible) return null;
 
-  const image = <Image style={styles.image} source={require('@/assets/images/expo-logo.png')} />;
+  const image = (
+    <Image
+      style={StyleSheet.absoluteFill}
+      contentFit="cover"
+      source={require('@/assets/images/山也启动页.png')}
+    />
+  );
 
   return animate ? (
     <Animated.View
@@ -59,15 +65,9 @@ export function AnimatedSplashOverlay() {
 }
 
 const styles = StyleSheet.create({
-  image: {
-    width: 76,
-    height: 71,
-  },
   splashOverlay: {
     ...StyleSheet.absoluteFill,
-    backgroundColor: '#208AEF',
-    alignItems: 'center',
-    justifyContent: 'center',
+    backgroundColor: '#F5EDE3',
     zIndex: 1000,
   },
 });
