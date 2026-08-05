@@ -84,19 +84,16 @@ export default function HomeScreen() {
     photos: true,
     placemarks: true,
   });
-  // 照片 EXIF GPS 为 WGS-84。Apple Maps 卫星图底图用 GCJ-02 但不做内部转换，
-  // 需手动 WGS-84 → GCJ-02 对齐底图（中国境外 wgs84ToGcj02 自动跳过）。
-  // 矢量图模式（standard 等）由 Apple Maps 内部处理 WGS-84 → GCJ-02，无需手动转换。
+  // 照片 EXIF GPS 为 WGS-84。中国区 Apple Maps 底图（矢量与卫星影像）均为 GCJ-02 加密网格，
+  // MKMapView 按 GCJ-02 解释传入坐标且不自动转换，故所有底图模式都需手动 WGS-84 → GCJ-02
+  // 对齐底图（中国境外 wgs84ToGcj02 自动跳过，无副作用）。
+  // 注意：不能在 standard 模式省略转换——"Apple Maps 内部自动转 GCJ-02"的假设已被实测推翻，
+  // 否则标准图下照片相对卫星图偏移 50~500 米。
   // layers.photos=false 时返回空数组，隐藏地图上所有照片 Marker。
   const photoMarkers = useMemo(() => {
     if (!layers.photos) return [];
-    const isSatellite =
-      mapType === 'satellite' ||
-      mapType === 'hybrid' ||
-      mapType === 'satelliteFlyover' ||
-      mapType === 'hybridFlyover';
-    return isSatellite ? photos.map((p) => withConvertedCoords(p, wgs84ToGcj02)) : photos;
-  }, [photos, mapType, layers.photos]);
+    return photos.map((p) => withConvertedCoords(p, wgs84ToGcj02));
+  }, [photos, layers.photos]);
   // 图层选择器浮层是否展开
   const [layerMenuVisible, setLayerMenuVisible] = useState(false);
   // 「图层」按钮在按钮组内的位置/尺寸，用于把选择器浮层定位到按钮左侧并垂直居中
@@ -171,8 +168,11 @@ export default function HomeScreen() {
 
   const handleSelectResult = useCallback(
     (point: GeoPoint, title: string) => {
-      setMarkers([{ ...point, title }]); // 搜索结果：显示默认大头针图标
-      moveMap({ ...point, latitudeDelta: 0.01, longitudeDelta: 0.01 });
+      // Nominatim 返回 WGS-84，中国区 Apple Maps 底图为 GCJ-02 网格，需转 GCJ-02 后
+      // 显示与定位对齐（境外 wgs84ToGcj02 自动跳过）。
+      const converted = withConvertedCoords(point, wgs84ToGcj02);
+      setMarkers([{ ...converted, title }]); // 搜索结果：显示默认大头针图标
+      moveMap({ ...converted, latitudeDelta: 0.01, longitudeDelta: 0.01 });
     },
     [moveMap]
   );

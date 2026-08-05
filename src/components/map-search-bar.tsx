@@ -14,6 +14,7 @@ import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 're
 import { Keyboard, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, {
+  Easing,
   FadeIn,
   useAnimatedStyle,
   useSharedValue,
@@ -75,12 +76,29 @@ export const MapSearchBar = forwardRef<MapSearchBarHandle, MapSearchBarProps>(
   useEffect(() => {
     if (Platform.OS !== 'ios') return;
     const showSub = Keyboard.addListener('keyboardWillShow', (e) => {
-      kbOffset.value = withTiming(Math.max(0, e.endCoordinates.height - insets.bottom), {
-        duration: 250,
+      // iOS 键盘通知先于 RN 焦点状态提交，且时序偶发不稳定：
+      // 首帧判断焦点若未落定则延迟重试一次，避免偶发不上移；
+      // 登入面板等其它弹层的输入框弹键盘时焦点不在此处，始终跳过。
+      const moveIfFocused = () => {
+        if (!inputRef.current?.isFocused()) return false;
+        kbOffset.value = withTiming(Math.max(0, e.endCoordinates.height - insets.bottom), {
+          // 跟随键盘自身动画时长与曲线（键盘为 easeOut 起步快），保证速度观感一致
+          duration: e.duration ?? 250,
+          easing: Easing.out(Easing.cubic),
+        });
+        return true;
+      };
+      requestAnimationFrame(() => {
+        if (!moveIfFocused()) {
+          setTimeout(moveIfFocused, 80);
+        }
       });
     });
-    const hideSub = Keyboard.addListener('keyboardWillHide', () => {
-      kbOffset.value = withTiming(0, { duration: 250 });
+    const hideSub = Keyboard.addListener('keyboardWillHide', (e) => {
+      kbOffset.value = withTiming(0, {
+        duration: e.duration ?? 250,
+        easing: Easing.out(Easing.cubic),
+      });
     });
     return () => {
       showSub.remove();

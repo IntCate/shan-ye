@@ -14,7 +14,11 @@ export type PhotoItem = {
   asset: Asset;
   /** = asset.id，作为 FlatList key 与 Image 缓存键。 */
   id: string;
-  /** getUri() 结果：图片=可显示源；视频=播放源（iOS 为 ph://，Android 为 file:///content://）。 */
+  /**
+   * 渲染源。iOS：= id（ph:// localIdentifier，expo-image 原生按需加载系统缩略图，
+   * 跳过 getUri 的 iCloud 下载/复制，与地图照片标记同款优化）；Android：getUri() 结果
+   * （content://），其 id 为 MediaStore 数字 ID 不可直接渲染。
+   */
   uri: string;
   /** 媒体类型（仅 IMAGE / VIDEO，查询已过滤）。 */
   mediaType: MediaType.IMAGE | MediaType.VIDEO;
@@ -22,8 +26,6 @@ export type PhotoItem = {
   width: number;
   /** 像素高。 */
   height: number;
-  /** 创建时间（UNIX 毫秒），用于二次排序兜底。 */
-  creationTime: number;
   /** 视频时长（毫秒），图片为 null。 */
   duration: number | null;
 };

@@ -200,6 +200,7 @@ export function ProfileSheet({
   const [viewerOpen, setViewerOpen] = useState(false);
   // 登录面板是否打开：作为二级面板嵌套渲染在本 Modal 内（与照片查看器同理），
   // 避免两个顶层原生 Modal 同时 present 触发 UIKit "already presenting" 崩溃。
+  // 打开登录时个人卡片滑出屏幕（见 openLogin），保证同一时刻仅一个面板可见。
   const [loginVisible, setLoginVisible] = useState(false);
   // 重命名弹层目标路径：非 null 时打开重命名面板（同样嵌套渲染在本 Modal 内）。
   const [renamingRoute, setRenamingRoute] = useState<Route | null>(null);
@@ -209,6 +210,40 @@ export function ProfileSheet({
     if (viewerOpen) return;
     close();
   }, [viewerOpen, close]);
+
+  // 打开登录面板：将个人卡片滑出屏幕并淡出遮罩（仅保留登录面板一个面板可见），
+  // 再呈现登录面板。登录面板仍嵌套渲染在本 Modal 内（保持 "already presenting" 安全）。
+  const openLogin = () => {
+    mode.value = 0;
+    setExpanded(false);
+    setSection('map');
+    targetHeightRef.current = MAP_HEIGHT;
+    cancelAnimation(cardHeight);
+    cancelAnimation(translateY);
+    cancelAnimation(backdropOpacity);
+    cardHeight.value = MAP_HEIGHT;
+    translateY.value = withTiming(MAP_HEIGHT, { duration: ANIM_DURATION, easing: Easing.out(Easing.cubic) });
+    backdropOpacity.value = withTiming(0, { duration: ANIM_DURATION });
+    setLoginVisible(true);
+  };
+
+  // 登录面板关闭（登录成功或取消）后：恢复个人面板滑回收起态。
+  const restoreProfile = () => {
+    setLoginVisible(false);
+    mode.value = 0;
+    setExpanded(false);
+    setSection('map');
+    targetHeightRef.current = MAP_HEIGHT;
+    cancelAnimation(cardHeight);
+    cancelAnimation(translateY);
+    cancelAnimation(backdropOpacity);
+    cardHeight.value = MAP_HEIGHT;
+    translateY.value = withTiming(MAP_HEIGHT - COLLAPSED_HEIGHT, {
+      duration: ANIM_DURATION,
+      easing: Easing.out(Easing.cubic),
+    });
+    backdropOpacity.value = withTiming(BACKDROP_OPACITY, { duration: ANIM_DURATION });
+  };
 
   // 记录上一次 visible，用于检测 false→true 的「打开」过渡。
   const prevVisibleRef = useRef(false);
@@ -348,9 +383,9 @@ export function ProfileSheet({
       bottomPadding={0}>
       {/* ===== 收起态内容：头像 + 昵称 + 统计数据（始终渲染，位于卡片顶部） ===== */}
             <View style={styles.collapsedContent}>
-              {/* 头像：未登录时点击打开登录面板 */}
+              {/* 头像：未登录时点击打开登录面板（个人面板先滑出，仅保留登录面板） */}
               <Pressable
-                onPress={user ? undefined : () => setLoginVisible(true)}
+                onPress={user ? undefined : openLogin}
                 disabled={!!user}
                 style={({ pressed }) => [styles.avatarWrap, !user && pressed && styles.pressed]}
                 accessibilityRole={user ? undefined : 'button'}
@@ -668,15 +703,17 @@ export function ProfileSheet({
             )}
       {/* 登录面板：作为本 Modal 的 children 嵌套渲染（与照片查看器同理）。
           RN Modal 组件渲染为独立原生窗口（全屏 present 到本 Modal 的 VC 上），
-          不受上方卡片容器位置影响，视觉上盖在个人面板之上。若放在 Modal 外
-          （Fragment 平级），会与个人面板同挂根 VC，触发 "already presenting" 崩溃。 */}
+          不受上方卡片容器位置影响。若放在 Modal 外（Fragment 平级），会与个人
+          面板同挂根 VC，触发 "already presenting" 崩溃。
+          打开登录时个人卡片已滑出屏幕（openLogin），登录面板视觉上独占屏幕；
+          成功/取消后由 restoreProfile 将个人面板滑回收起态，同一时刻仅一个面板。 */}
       <LoginSheet
         visible={loginVisible}
         onLogin={(u) => {
           onLogin(u);
-          setLoginVisible(false);
+          restoreProfile();
         }}
-        onClose={() => setLoginVisible(false)}
+        onClose={restoreProfile}
       />
       {/* 重命名弹层：与登录面板同模式嵌套渲染 */}
       <RenameRouteSheet

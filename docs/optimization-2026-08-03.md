@@ -46,6 +46,19 @@
 | 35 | 问题修复 / 交互 | 搜索框与按钮组遮挡互斥 | 修改 2 文件 | 聚焦搜索时隐藏右侧悬浮按钮组，消除键盘避让上移/结果列表与按钮组重叠遮挡 |
 | 36 | 交互 | 取消聚焦清空搜索框 | 修改 1 文件 | 点地图收起搜索（dismiss）时清空已输入文字，下次聚焦从空白开始 |
 | 37 | 功能增强 / 重命名 | 标点图层 + 地点→标点全量重命名 | 修改 5 文件；重命名 3 文件 | 图层菜单新增「标点」开关（地图上橙色圆点展示收藏标点）；个人面板「地点」改为「标点」；代码变量 Place→Placemark、usePlaces→usePlacemarks、MapSavePlaceCard→MapSavePlacemarkCard 等 |
+| 38 | 性能 | 相册网格 getUri 瘦身（iOS ph:// 渲染） | 修改 2 文件 | iOS 网格/查看器改用 ph:// id 渲染，跳过 getUri 的 iCloud 下载/复制，每页 60 张省下载成本；缓存键稳定化 |
+| 39 | 性能 | 相册物化字段瘦身 | 修改 2 文件 | 移除 getCreationTime 死字段（iOS 每张 4→3 个 getter），PhotoItem 类型同步删减 |
+| 40 | 功能增强 | 相册网格增量刷新 | 修改 1 文件 | 网格监听 mediaLibraryDidChange，拍照/删除后自动刷新，无需手动下拉 |
+| 41 | 问题修复 | 照片统计口径修正 | 修改 1 文件 | 面板「照片」统计改为纯图片数，与网格口径一致（补 #26 承诺遗漏） |
+| 42 | 问题修复 | 相册网格 offset → 游标分页 | 修改 1 文件 | 媒体库新增照片不再导致分页偏移错位；lt 游标单调递减无死循环 |
+| 43 | 功能增强 / UI 动效 | 预览模式下滑关闭改为「飞回缩略图」（iOS Photos 风格） | 修改 1 文件 | 关闭动画三轴同步（translate + scale + 裁剪框收紧），sourceRect 传入预览模式 |
+| 44 | 问题修复 | 拖拽关闭期间隐藏邻页（消除左右露出相邻照片） | 修改 1 文件 | 拖拽时非当前页渲染透明占位；回弹后恢复，关闭动画期间保持隐藏 |
+| 45 | 功能增强 / UI 动效 | 画廊缩略图离散缩放（当前项放大让位，iOS Photos 风格） | 修改 1 文件 | 按「活跃索引」离散缩放：滚动停止/程序跳转后当前项 1.2、相邻项 0.9，200ms 平滑过渡（拖动/惯性滚动中所有项统一尺寸、无缩放） |
+| 46 | 问题修复 | 画廊惯性长滚动手感（减速曲线 + 原生 snap 接管） | 修改 1 文件 | decelerationRate 0.997 + 移除原生 snapToInterval（iOS 会接管减速曲线致「冲过去骤停」），改惯性停止后 JS 短距吸附回整槽 |
+| 47 | UI 调整 | 移除照片查看器顶栏返回按钮 | 修改 1 文件 | 预览/全屏模式顶栏仅保留居中计数，关闭走下滑拖拽 |
+| 48 | 问题修复 | 预览→全屏切换底层背景闪过 | 修改 1 文件 | 进入全屏前瞬时置黑 bgOpacity=1，消除渲染首帧透明导致底层透出 |
+| 49 | 功能增强 / UI 动效 | 全屏→预览切换缩回动画（消除跳跃感） | 修改 1 文件 | 单击退出先播放缩回动画（图片缩回预览位置 + 黑底淡出露白底）再切状态，动画终点与预览布局一致 |
+| 50 | 交互 / 视觉 | 登录面板与个人面板互斥（同一时刻仅一个面板） | 修改 1 文件 | 点头像打开登录时个人卡片滑出屏幕 + 遮罩淡出；登录成功/取消后滑回收起态，消除双面板层叠 |
 
 ## 二、优化详情
 
@@ -627,6 +640,167 @@
 
 **未实施（中/低优先级，避免过度改动）**：面板「打开检测」模式（4 处 `prevRef` + useEffect，见 #2 骨架外的残留重复）、loadingRef 互斥锁收敛（2 处）、index.tsx 上帝组件拆分（已有历史记录）。
 
+### 38. 相册网格 getUri 瘦身（性能，2026-08-05）
+
+**背景**：优化 #8 的「照片与 EXIF 提取专项」只在地图照片管线移除了 `getUri`（iOS 上触发 iCloud 下载 + 文件复制，`isNetworkAccessAllowed=true`），相册网格/查看器管线仍每张调用 `getUri()`，每页 60 张全量承担下载/复制成本。
+
+**修改**（`src/hooks/use-photo-album.ts` + `src/types/photo-album.ts`）：
+- 物化时 `uri = Platform.OS === 'ios' ? a.id : await a.getUri()`——iOS 的 `Asset.id` 即 ph:// localIdentifier，expo-image 原生支持按需加载系统缩略图（与地图照片标记 #8 同款优化），跳过 getUri 的下载/复制 + 桥接；Android 的 id 为 MediaStore 数字 ID 不可直接渲染，仍取 getUri 的 content://
+- `PhotoItem.uri` 字段语义注释更新；渲染层（网格 / 查看器 / 画廊）零改动，iOS 自动变为 ph:// 渲染
+- 附带收益：缓存键从每次可能变化的沙盒 file:// 路径变为稳定的 ph:// localIdentifier，缓存命中率提升
+
+### 39. 相册物化字段瘦身（性能，2026-08-05）
+
+**修改**（`src/hooks/use-photo-album.ts` + `src/types/photo-album.ts`）：
+- 物化移除 `getCreationTime()`（iOS 每张 4→3 个 getter）
+- `PhotoItem.creationTime` 为死字段（grid/viewer/视频防御代码均无消费，查询本身已 `orderBy` 排序），从类型移除
+- 保留 `width/height`（查看器 contain 渲染尺寸计算用）、`duration`（视频防御代码用）
+
+### 40. 相册网格增量刷新（功能增强，2026-08-05）
+
+**修改**（`src/hooks/use-photo-album.ts`）：
+- 新增 `addListener('mediaLibraryDidChange')` 监听 → 自动刷新网格：拍照后照片自动出现在顶部、删除后消失，无需手动下拉（与地图标记 `useGeotaggedPhotos` 同模式）
+- `loadPage/loadMore/refresh` `useCallback` 化，保证监听 effect 订阅稳定、避免重复订阅
+
+### 41. 照片统计口径修正（问题修复，2026-08-05）
+
+**修改**（`src/hooks/use-media-count.ts`）：
+- 面板「照片」统计从「图片 + 视频」改为纯图片数（`mediaType: MediaType.photo`），与网格口径一致——补上 #26 文档承诺但代码遗漏的改动（#26 后网格数据层只查询图片，视频因 iOS 18+ 系统限制被跳过）
+
+### 42. 相册网格 offset → 游标分页（问题修复，2026-08-05）
+
+**背景**：原 `offset` 分页在媒体库新增照片（排最前）后整体偏移错位——已加载项重复、尾部照片跳过。
+
+**修改**（`src/hooks/use-photo-album.ts`）：
+- 删除 `pageRef`/`offset`，改 `creationTime` 游标分页：每页 `query.lt(AssetField.CREATION_TIME, 游标)` 只取「早于已加载照片」的内容；游标 = 本页最后一张（时间倒序即本页最小时间）的 `getCreationTime()`，每页仅 1 次轻量读取
+- 语义：新增照片只影响最新页，后续页从上次看到的时间戳继续，已加载项永不受影响；刷新（首屏 / 下拉）游标归 null 回到最新
+- 边界：查询用 `lt` 严格小于保证游标单调递减——无重复、无死循环；游标取不到（空页 / 时间戳异常）→ `hasMore=false` 终止；代价为同毫秒跨页边界照片跳过（批量导入同毫秒多张的罕见场景）
+- 依据：SDK 57 `Query.lt` + `AssetField.CREATION_TIME`（毫秒整数）已核实存在（`node_modules/expo-media-library/build/types/Query.d.ts`）
+- 未改动 `useGeotaggedPhotos`（地图扫描同样用 offset）：短时批量扫描 + `mediaLibraryDidChange` 全量重扫自愈，无长期分页浏览场景，风险收益不成比例
+
+### 43. 预览模式下滑关闭改为「飞回缩略图」（功能增强 / UI 动效，2026-08-05）
+
+**背景**：预览模式（照片面板点击打开）下滑关闭动画原本是 `translateY → withTiming(screenHeight)`——图片直接向下飞出屏幕外，缺少 iOS Photos 的「缩回缩略图」归位感。`sourceRect`（被点击缩略图屏幕坐标）此前只传给全屏模式 ViewerImage，PreviewImage 未使用。
+
+**效果确认**（与用户对齐）：拖动保持垂直优先（`activeOffsetY(8)` + `failOffsetX(8)` 让位横向翻页）；松手判定阈值保持 140px / 1000 速度（与全屏模式一致）。
+
+**修改**（`src/components/photo-album/photo-viewer.tsx`）：
+- `PhotoViewer`：`sourceRect` + 图片区顶部屏幕 y（`imageAreaTop`，imageList `onLayout` 测得）传入 `PreviewImage`；新增 `previewImgX` 共享值
+- `PreviewImage` 重构为双层容器（与 ViewerImage 同构）：裁剪容器（`clipW×clipH` 尺寸动画 + translate，overflow hidden）→ 缩放容器（固定 `renderW×renderH` + scale）→ Image（cover 填充）
+- 拖拽跟手：`translateX/Y` 完全跟手 + 随距离缩小（1→0.3）+ chrome 淡出
+- 关闭动画三轴同步：translate → 缩略图中心（相对图片区中心换算：`targetX = sx+sw/2 − 屏宽/2`，`targetY = sy+sh/2 − (imageAreaTop+height/2)`）、scale → `dismissScale`（cover 填满缩略图）、裁剪框收紧到 `sw×sh`（CLIP_DURATION=120ms 先收紧）、chrome → 0 后 onClose
+- 未达阈值弹簧回中（translateX 一并归 0）；删除废弃的 `previewImage`/`previewImageFill` 样式
+
+### 44. 拖拽关闭期间隐藏邻页（问题修复，2026-08-05）
+
+**现象**（与用户核对）：预览模式拖拽下滑关闭时，左右会露出上一张/下一张照片——往左拖露出右侧下一张、往右拖露出左侧上一张；回弹后正常。
+
+**成因**：图片区是横向 `pagingEnabled` FlatList，对齐整页时邻页在屏外不可见；当 FlatList 翻页中途/惯性中被垂直拖拽手势抢占时停在半页位置，拖拽中图片缩小下移，左右露出相邻页图片。
+
+**修改**（`src/components/photo-album/photo-viewer.tsx`）：
+- `PhotoViewer` 新增 `dragging` state；预览模式 renderItem 中 `dragging && !isCurrent` 渲染透明占位（不渲染邻页图片）
+- `PreviewImage` 新增 `onDragStart`/`onDragEnd`：Pan `.onBegin` 调 `onDragStart`（1 帧后邻页隐藏）、回弹分支调 `onDragEnd`（邻页恢复）；关闭分支不调用——飞回缩略图动画期间邻页保持隐藏
+- 覆盖所有情况（无论 FlatList 是否对齐），拖拽中左右始终干净；全屏模式邻页本就是静态占位，不受影响
+
+### 45. 画廊缩略图离散缩放（功能增强 / UI 动效，2026-08-05）
+
+**背景**：画廊缩略图原本「当前项无框正方形、非当前项 9:16 竖长方形 + 白线」，无放大/让位效果，与 iOS Photos 画廊视觉差距明显。
+
+**方案确认**（与用户对齐）：仅做「当前项放大让位」，不动「画廊滚动 → 主图平滑跟随」（触碰 #19 卡死教训）。
+
+**初版（滚动偏移跟手缩放）与用户反馈**：初版按「与视口中心距离」实时缩放（`dist = |index × GALLERY_SLOT − scrollX|`，`interpolate(dist, [0, GALLERY_SLOT], [1.2, 0.9], CLAMP)`）。真机反馈两个问题：
+- 手动拖动过程中所有项实时放大/缩小，「像在刮痧」，应只有松手后当前项才放大
+- 长距离惯性滚动时「当前项替换效果一直存在」（滑动中随中心变化持续切换放大项）
+
+两者同源：跟手缩放把「缩放动画」绑定到滚动过程。**结论：缩放改为离散驱动**——拖动/惯性滚动中所有项统一尺寸（无缩放），滚动完全停止 / 程序跳转后才以 `withTiming` 平滑过渡到当前项。
+
+**修订修改**（`src/components/photo-album/photo-viewer.tsx`）：
+- 新增 `GALLERY_BASE_SCALE = 0.9` / `GALLERY_SCALE_DURATION = 200`（`GALLERY_ACTIVE_SCALE = 1.2` 保留）
+- 新增共享值 `galleryActiveIndex`（活跃索引，初始为 initialIndex）；删除初版 `galleryScrollX` 及 `onGalleryScroll` 里的 scrollX 同步
+- 新增 `syncActiveScaleIndex(index)`：`galleryActiveIndex.value = withTiming(index, { duration: 200 })`，中间项带波峰扫过
+- 新增滚动停止事件：`onGalleryScrollEndDrag`（velocity 为 0 即无惯性，RN 0.86 types 对 `NativeScrollEvent.velocity` 口径矛盾，局部断言读取）、`onMomentumScrollEnd`（惯性/snap 吸附完成）；拖动中不调用 → 无缩放
+- 主图翻页 useEffect / `handleThumbnailPress` 末尾调 `syncActiveScaleIndex(currentIndex)`：程序跳转（翻页/点缩略图）后画廊活跃索引平滑过渡到当前项
+- `GalleryThumbnail` props 由 `scrollX` 改为 `activeIndex`（`SharedValue<number>`）：`dist = |index − activeIndex.value|`，`interpolate(dist, [0, 1], [1.2, 0.9], CLAMP)`——活跃项放大、相邻项缩小，滚动停止后 200ms 平滑过渡
+- 缩放用 transform（不占位）：槽宽 46 固定，snapToInterval / getItemLayout / 居中计算零改动；放大项（视觉 48px）与相邻缩小项（36px）间隙充足无重叠
+- 白框/白线（isCurrent 离散状态）与离散缩放并存：缩放离散、高亮离散
+
+### 46. 画廊惯性长滚动手感（问题修复，2026-08-05）
+
+**背景**：用户反馈「惯性长滚动不自然，滚动速度不是又快到慢的感觉」。
+
+**原因**：画廊 `decelerationRate="fast"`（= 0.99）衰减指数过高——90% 的滑动位移在极短时间内完成，慢速尾段几乎不可见，视觉上「冲出去骤停」；且 snapToInterval 把长甩动的停点吸到较远整槽，中间段速度衰减相对平缓接近匀速。两者叠加使长滚动缺少自然减速感。
+
+**方案确认**（与用户对齐）：选 A 调慢衰减（推荐）。
+
+**修改**（`src/components/photo-album/photo-viewer.tsx`，画廊 FlatList）：
+- `decelerationRate` `"fast"`(0.99) → `0.997`（介于 fast 与 normal 0.998 之间）：滑行距离约为此前的 3.3 倍，由快到慢的减速尾段明显，接近 iOS Photos 画廊手感
+- snapToInterval / snapToAlignment / getItemLayout / 居中计算零改动，吸附对齐逻辑不变
+
+**中途回退**：初改曾加 `disableIntervalMomentum`（设想 Android only 消除逐槽咔哒）。实机反馈「滑不动了」——该 prop 在 iOS 原生端同样被声明与处理（`ScrollViewNativeComponent` 两端 validAttributes 均含），表现为惯性 fling 被禁用、松手即停。已回退该 prop；代码注释记录教训防止误加。
+
+**二次反馈与根治**：调慢衰减后用户仍反馈「快到慢不自然，应该逐渐衰减直到慢下来，而不是突然停下来」。定位：iOS 上只要设了 `snapToInterval`，松手后系统在 `scrollViewWillEndDragging` 修正 `targetContentOffset`（吸附整槽 + 按速度方向推一槽），UIScrollView 减速变为「从当前点到修正目标的定长缓动」，`decelerationRate` 指数衰减曲线被接管 → 高速甩动「冲过去骤停」。**根治**：移除原生 `snapToInterval`/`snapToAlignment`，改为：
+- 原生惯性：`decelerationRate` 指数衰减（由快到慢），不再被 snap 修正接管
+- 新增 `snapGalleryToSlot(contentX)`：惯性停止（onMomentumScrollEnd）/ 无惯性松手（onScrollEndDrag velocity=0）后，`scrollToOffset({ offset: round(x/槽宽)×槽宽, animated: true })` 平滑吸附回整槽（≤半槽 23pt）。吸附动画是画廊自身 `setContentOffset:animated:`——单次、距离≤半槽、非跨列表，无 #19「跨列表程序滚动动画反复打断 UIScrollView」回环风险；用户新触摸会中断它。目标 clamp 到最大 offset = (项数−1)×槽宽，防尾端越界弹回
+- 吸附动画中的 onScroll：round 后居中索引与 currentIndex 恒等（吸附目标槽 = 当前居中槽），不会触发额外切页
+
+### 47. 移除照片查看器顶栏返回按钮（UI 调整，2026-08-05）
+
+**背景**：预览模式与全屏（查看）模式顶栏均显示返回按钮（chevron.backward）+ 计数。用户要求移除两个模式的顶部返回按钮。
+
+**关闭路径**（移除后仍完整）：
+- 预览模式：向下拖拽下滑关闭
+- 全屏模式：下滑拖拽飞回缩略图关闭、单击图片回预览模式
+
+**修改**（`src/components/photo-album/photo-viewer.tsx`）：
+- `topBarContent` 移除返回 `Pressable`（含 `SymbolView`），仅保留计数 `currentIndex + 1 / items.length`
+- `topBarInline` / `topBar` 的 `justifyContent` `space-between` → `center`（移除按钮后计数居中，视觉平衡）
+- 删除仅返回按钮使用的 `liquidBtn` 样式（`Pressable`/`SymbolView` 导入仍被画廊缩略图使用，保留）
+
+### 48. 预览→全屏切换底层背景闪过（问题修复，2026-08-05）
+
+**背景**：用户反馈「预览模式到全屏模式的切换不干净，变化过程中会有底层背景闪过」。
+
+**原因**：进入全屏的时序问题。原实现 `setIsFullscreen(true)` 触发渲染后，才在 useEffect 里 `withTiming(1)` 淡入黑色背景；而渲染首帧时 `bgOpacity` 仍是上次退出全屏归零的值 0 → 黑色背景透明 → 底层（个人面板/网格）透出，随后黑色才淡入覆盖。
+
+**修改**（`src/components/photo-album/photo-viewer.tsx`）：
+- 新增 `enterFullscreen`：先**瞬时**置 `bgOpacity.value = 1`（并重置 translate/scale），再 `setIsFullscreen(true)`——渲染全屏首帧背景即为黑，无透明帧
+- `PreviewImage` 的 `onPress` 改走 `enterFullscreen`
+- useEffect 简化为仅处理退出分支（重置共享值为下次进入准备；退出渲染预览白色背景不透明，无透出问题）
+
+### 49. 全屏→预览切换缩回动画（功能增强 / UI 动效，2026-08-05）
+
+**背景**：用户反馈「全屏模式切回预览模式的时候有跳跃感」。
+
+**原因**：`setIsFullscreen(false)` 直接切状态，图片从占满全屏瞬间变为预览 contain 缩小，布局突变无过渡。
+
+**方案**：复用拖拽关闭的三轴同步机制（translate + scale + 裁剪框收紧）——退出时先把图片从全屏占满平滑缩回预览 contain 位置、黑色背景淡出露出白底，动画完成后再切状态。动画终点与预览布局一致，切换无跳跃。
+
+**修改**（`src/components/photo-album/photo-viewer.tsx`）：
+- 背景改双层：白色预览背景常驻（`previewChromeOpacity` 控制），黑色全屏背景仅在 isFullscreen 叠加——退出动画黑底淡出直接露出白底，底层不会透出
+- 新增 `previewLayoutRef` 缓存进入全屏前的预览布局（图片区 top/height），`enterFullscreen` 时写入
+- `ViewerImage` 新增 `previewTop`/`previewHeight`/`onExit` props；Tap 由「直接切状态」改为播放缩回动画：translateY → 图片区中心偏移、scale → 预览/全屏尺寸比、clipW/H → 预览 contain 尺寸、bgOpacity → 0，完成后 `runOnJS(onExit)` 切回预览
+- 预览 contain 尺寸计算与 PreviewImage 一致（宽取屏宽，高按 aspect 限制不超过图片区高度），动画终点与预览渲染完全重合
+
+**实机反馈与修复**：用户反馈「切回预览时图片向下跳动一下」。原因：退出全屏切状态的首帧，`listHeight`/`imageAreaTop` 仍是全屏布局的过期值（screenHeight/0），PreviewImage 用其计算 contain 尺寸 → 首帧图片位置错误（偏下），随后 FlatList onLayout 触发修正 → 跳变。修复：`exitFullscreen` 在 `setIsFullscreen(false)` 前先将 `listHeight`/`imageAreaTop` 同步为缓存的预览值（`previewLayoutRef`），首帧即正确渲染，onLayout 测得同值无二次渲染，无跳变。
+
+### 50. 登录面板与个人面板互斥（交互 / 视觉，2026-08-05）
+
+**现象**：个人面板未登录点击头像弹出登录面板时，**两个面板同时可见**——个人面板卡片与遮罩留在下层，登录面板（也是全屏底部弹层 Modal）叠在上层，遮罩双重变暗、UI 层杂乱。
+
+**根因**：`profile-sheet.tsx` 中 `LoginSheet` 作为二级面板**嵌套渲染在本 Modal 内**（为了规避两个顶层原生 Modal 同时 present 触发 UIKit "already presenting" 崩溃，该方案刻意保留）。嵌套本身安全，但打开登录时个人面板未做任何隐藏处理——卡片仍停靠收起位、遮罩仍 0.5 透明度，于是视觉上两个面板同时存在。
+
+**方案**：保持嵌套 Modal 的安全架构不变，改为**打开登录面板时先将个人面板滑出屏幕并淡出遮罩**，视觉上实现「同一时刻仅一个面板」；登录成功或取消后再将个人面板滑回收起态。
+
+**修改**（`src/components/profile-sheet.tsx`）：
+- 新增 `openLogin()`：复位到收起态（`mode=0` / `setExpanded(false)` / `section='map'`）后，`cancelAnimation` 清掉残留动画，`cardHeight=MAP_HEIGHT`，`translateY` 动画至 `MAP_HEIGHT`（卡片完全滑出屏幕底），`backdropOpacity` 淡出至 0，再 `setLoginVisible(true)` 呈现登录面板。个人面板 Modal 保持 present 状态（登录面板仍安全地 present 在其 VC 上），但卡片与遮罩均已不可见
+- 新增 `restoreProfile()`：登录流程结束（成功或取消）后 `setLoginVisible(false)` 卸载登录面板，同样复位到收起态，`translateY` 动画回 `MAP_HEIGHT - COLLAPSED_HEIGHT`（收起位）、`backdropOpacity` 淡入回 `BACKDROP_OPACITY`
+- 头像点击由 `() => setLoginVisible(true)` 改为 `openLogin`（收起态才可见头像，登录入口语义不变）
+- `LoginSheet` 的 `onLogin`（成功）与 `onClose`（取消）统一走 `restoreProfile`——成功后 `onLogin(u)` 先更新父级用户态，再滑回面板展示已登录昵称
+
+**交互流**：点头像 → 个人卡片下滑退出、登录面板上滑进入（过渡期两侧遮罩一淡一浓约保持总暗度恒定）→ 登录成功：登录面板卸载、个人面板滑回收起态（已登录）；取消（X / 遮罩 / 下滑）：登录面板滑出后个人面板滑回（未登录）；退出登录仍在个人面板内原地切换，不受影响。
+
+**验证**：`npx tsc --noEmit` 通过。
+
 ## 三、验证与回归
 
 - **静态验证**：每阶段 `npx tsc --noEmit` 通过；删除文件后 `rg` 确认无残留引用
@@ -654,6 +828,18 @@
   - 标点图层与重命名（#37）：图层菜单「标点」开关控制地图橙点显隐、长按保存默认名「标点 N」、个人面板统计项/列表/空态均为「标点」、点击标点定位、删除标点后统计数与地图同步
   - 搜索框与按钮组遮挡互斥（#35）：点搜索框聚焦按钮组隐藏、键盘弹出搜索框上移与结果列表均不被按钮遮挡、按回车/下滑收起键盘（blur）结果仍开时按钮组保持隐藏不遮挡、点结果/点地图结束会话后按钮组恢复、图层浮层随按钮组同步显隐
   - 定位订阅重构（#33）：海拔面板开合订阅启停正常、路径录制完整回归（开始→暂停→继续→结束、里程/耗时/海拔统计、轨迹保存为路线）、暂停期间订阅移除省电、卸载无泄漏
+  - 相册 getUri 瘦身（#38）：iOS 网格缩略图正常显示（ph:// 渲染）、查看器翻页/大图/下滑关闭动画正常、Android 行为不变
+  - 相册增量刷新（#40）：拍照后照片面板自动出现新照片、删除后消失、网格滚动/加载不受监听影响（loadingRef 互斥锁保护）
+  - 统计口径（#41）：面板照片统计数与网格实际图片数一致
+  - 游标分页（#42）：滚动加载多页后拍照，继续下拉无重复项/跳项；下拉刷新回到最新页；空相册/单页相册正常结束加载
+  - 预览模式飞回缩略图（#43）：下滑拖动跟手、松手超阈值图片缩放 + 裁剪飞回源缩略图（侧列缩略图位置准确）、未达阈值弹簧回中、单击进全屏与横向翻页不受影响
+  - 拖拽隐藏邻页（#44）：翻页中途/斜向拖拽时左右不再露出相邻照片、回弹后邻页恢复、横向翻页正常
+  - 画廊离散缩放（#45）：手动拖动过程中所有项统一尺寸、无缩放；松手无惯性时当前项平滑放大；惯性滚动经过多个槽时拖动/滚动中无缩放，吸附停止后最终居中项放大；长距离滚动无「当前项替换一直存在」现象；点击缩略图/主图翻页后画廊活跃项随程序跳转平滑过渡；快速惯性滚动不卡顿
+  - 画廊惯性长滚动手感（#46）：长甩动画廊速度指数衰减「由快到慢」、减速尾段明显（非骤停）、惯性停止后平滑吸附回整槽且居中项=当前项、吸附动画不触发额外切页/不卡顿、拖动/惯性后缩放与主图联动正常；惯性未被禁用（松手后仍滑动）
+  - 顶栏返回按钮移除（#47）：预览/全屏模式顶栏均无返回按钮、仅居中计数、下滑拖拽关闭正常、全屏单击回预览正常
+  - 全屏切换背景（#48）：预览单击进全屏瞬间无底层背景闪过（首帧即黑）、黑色背景不再淡入、退出全屏回预览正常、全屏拖拽关闭背景淡出正常
+  - 全屏切回预览缩回动画（#49）：单击退出全屏图片平滑缩回预览 contain 位置（无跳跃、无向下跳动）、黑底淡出白底显现无底层透出、动画完成后画廊/顶栏出现、拖拽下滑关闭与预览下滑关闭不受影响、再次进入全屏正常
+  - 登录面板与个人面板互斥（#50）：未登录点头像时个人面板滑出、仅登录面板可见（无双重遮罩）；登录成功后个人面板滑回并显示已登录昵称；点 X / 遮罩 / 下滑取消后个人面板滑回未登录态；退出登录在面板内原地切换；登录流程无 "already presenting" 崩溃
 
 ## 四、后续可选（未承诺）
 
